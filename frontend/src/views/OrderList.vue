@@ -2,7 +2,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
-import { getOrderLogs, getOrderStatus, getOrders, payOrder, receiveOrder, shipOrder, updateOrderStatus } from '@/api/order'
+import { createOrderComment, getOrderLogs, getOrderStatus, getOrders, payOrder, receiveOrder, shipOrder, updateOrderStatus } from '@/api/order'
+import { createRefund } from '@/api/refund'
 
 const authStore = useAuthStore()
 const role = computed(() => authStore.user?.role || '')
@@ -24,6 +25,22 @@ const shipForm = reactive({
 const logDialogVisible = ref(false)
 const currentLogOrderId = ref(null)
 const orderLogs = ref([])
+
+const commentDialogVisible = ref(false)
+const commentSubmitting = ref(false)
+const commentForm = reactive({
+  orderId: null,
+  rating: 5,
+  content: '',
+})
+
+const refundDialogVisible = ref(false)
+const refundSubmitting = ref(false)
+const refundForm = reactive({
+  orderId: null,
+  reason: '',
+  buyer_note: '',
+})
 
 function statusType(status) {
   if (status === 'pending_paid') return 'warning'
@@ -75,13 +92,21 @@ function canPay(order) {
   return role.value === 'buyer' && order.status === 'pending_paid'
 }
 
+function canComment(order) {
+  return role.value === 'buyer' && order.status === 'completed'
+}
+
+function canApplyRefund(order) {
+  return role.value === 'buyer' && order.pay_status === 'paid' && order.status !== 'shipped'
+}
+
 async function fetchOrders() {
   loading.value = true
   try {
     const res = await getOrders()
     orders.value = res.data || []
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '获取订单列表失败')
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '获取订单列表失败')
   } finally {
     loading.value = false
   }
@@ -94,7 +119,7 @@ async function handleGetLatestStatus(order) {
     order.status = res.data?.status || order.status
     ElMessage.success(`订单 ${order.id} 最新状态：${statusLabel(order.status)}`)
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '查询订单状态失败')
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '查询订单状态失败')
   } finally {
     checkingStatusId.value = null
   }
@@ -108,7 +133,7 @@ async function handleViewLogs(order) {
     currentLogOrderId.value = order.id
     logDialogVisible.value = true
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '获取状态轨迹失败')
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '获取状态轨迹失败')
   } finally {
     loadingLogId.value = null
   }
@@ -121,7 +146,7 @@ async function handleCancelOrder(order) {
     order.status = res.data?.status || 'cancelled'
     ElMessage.success(res.message || '订单已取消')
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '取消订单失败')
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '取消订单失败')
   } finally {
     updatingStatusId.value = null
   }
@@ -149,7 +174,7 @@ async function handleReceiveOrder(order) {
     order.received_at = res.data?.received_at || order.received_at
     ElMessage.success(res.message || '确认收货成功')
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '确认收货失败')
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '确认收货失败')
   } finally {
     updatingStatusId.value = null
   }
@@ -183,9 +208,64 @@ async function submitShip() {
     shipDialogVisible.value = false
     await fetchOrders()
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '发货失败')
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '发货失败')
   } finally {
     shipSubmitting.value = false
+  }
+}
+
+function openCommentDialog(order) {
+  commentForm.orderId = order.id
+  commentForm.rating = 5
+  commentForm.content = ''
+  commentDialogVisible.value = true
+}
+
+async function submitComment() {
+  if (!commentForm.orderId) return
+
+  commentSubmitting.value = true
+  try {
+    const res = await createOrderComment(commentForm.orderId, {
+      rating: Number(commentForm.rating),
+      content: commentForm.content.trim(),
+    })
+    ElMessage.success(res.message || '评价成功')
+    commentDialogVisible.value = false
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '评价失败')
+  } finally {
+    commentSubmitting.value = false
+  }
+}
+
+function openRefundDialog(order) {
+  refundForm.orderId = order.id
+  refundForm.reason = ''
+  refundForm.buyer_note = ''
+  refundDialogVisible.value = true
+}
+
+async function submitRefund() {
+  if (!refundForm.orderId) return
+  if (!refundForm.reason.trim()) {
+    ElMessage.warning('请填写退款原因')
+    return
+  }
+
+  refundSubmitting.value = true
+  try {
+    const res = await createRefund({
+      order_id: refundForm.orderId,
+      reason: refundForm.reason.trim(),
+      buyer_note: refundForm.buyer_note.trim(),
+    })
+    ElMessage.success(res.message || '退款申请已提交')
+    refundDialogVisible.value = false
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '退款申请失败')
+  } finally {
+    refundSubmitting.value = false
   }
 }
 
@@ -216,6 +296,7 @@ onMounted(fetchOrders)
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="pay_status" label="支付状态" width="120" />
         <el-table-column prop="logistics_company" label="物流公司" min-width="140">
           <template #default="scope">{{ scope.row.logistics_company || '-' }}</template>
         </el-table-column>
@@ -225,7 +306,7 @@ onMounted(fetchOrders)
         <el-table-column label="发货时间" min-width="170">
           <template #default="scope">{{ formatTime(scope.row.shipped_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="340" fixed="right">
+        <el-table-column label="操作" width="520" fixed="right">
           <template #default="scope">
             <div class="actions">
               <el-button :loading="checkingStatusId === scope.row.id" @click="handleGetLatestStatus(scope.row)">
@@ -270,6 +351,24 @@ onMounted(fetchOrders)
               >
                 取消订单
               </el-button>
+
+              <el-button
+                v-if="canApplyRefund(scope.row)"
+                type="danger"
+                plain
+                @click="openRefundDialog(scope.row)"
+              >
+                申请退款
+              </el-button>
+
+              <el-button
+                v-if="canComment(scope.row)"
+                type="success"
+                plain
+                @click="openCommentDialog(scope.row)"
+              >
+                评价订单
+              </el-button>
             </div>
           </template>
         </el-table-column>
@@ -313,6 +412,36 @@ onMounted(fetchOrders)
       </el-timeline>
       <template #footer>
         <el-button type="primary" @click="logDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="commentDialogVisible" title="订单评价" width="520px">
+      <el-form label-position="top">
+        <el-form-item label="评分">
+          <el-rate v-model="commentForm.rating" :max="5" />
+        </el-form-item>
+        <el-form-item label="评价内容">
+          <el-input v-model="commentForm.content" type="textarea" :rows="4" maxlength="2000" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="commentDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="commentSubmitting" @click="submitComment">提交评价</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="refundDialogVisible" title="申请退款" width="560px">
+      <el-form label-position="top">
+        <el-form-item label="退款原因" required>
+          <el-input v-model="refundForm.reason" type="textarea" :rows="3" maxlength="2000" show-word-limit />
+        </el-form-item>
+        <el-form-item label="补充说明">
+          <el-input v-model="refundForm.buyer_note" type="textarea" :rows="3" maxlength="2000" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="refundDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="refundSubmitting" @click="submitRefund">提交申请</el-button>
       </template>
     </el-dialog>
   </div>

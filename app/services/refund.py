@@ -34,7 +34,7 @@ async def create_refund(db: AsyncSession, current_user: User, payload: RefundCre
 
 async def seller_review_refund(db: AsyncSession, current_user: User, refund_id: int, payload: RefundSellerReview):
     ensure(current_user.role == UserRole.seller, "ROLE_DENIED", "仅卖家可审核退款", 403)
-    refund = await refund_crud.get_refund(db, refund_id)
+    refund = await refund_crud.get_refund_for_update(db, refund_id)
     ensure(refund is not None, "REFUND_NOT_FOUND", "退款单不存在", 404)
     ensure(refund.seller_id == current_user.id, "REFUND_FORBIDDEN", "仅订单所属卖家可审核退款", 403)
 

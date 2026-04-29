@@ -18,9 +18,9 @@ from app.schemas.order import OrderCommentCreate, OrderCreate, ShipOrderPayload
 
 def _can_transition(from_status: OrderStatus, to_status: OrderStatus) -> bool:
     transitions = {
-        OrderStatus.created: {OrderStatus.pending_paid, OrderStatus.paid, OrderStatus.cancelled, OrderStatus.closed},
+        OrderStatus.created: {OrderStatus.pending_paid, OrderStatus.paid, OrderStatus.closed},
         OrderStatus.pending_paid: {OrderStatus.paid, OrderStatus.cancelled, OrderStatus.closed},
-        OrderStatus.paid: {OrderStatus.shipped, OrderStatus.cancelled, OrderStatus.closed},
+        OrderStatus.paid: {OrderStatus.shipped, OrderStatus.closed},
         OrderStatus.shipped: {OrderStatus.completed},
         OrderStatus.completed: set(),
         OrderStatus.cancelled: set(),
@@ -64,23 +64,8 @@ def _serialize_address(address: UserAddress) -> str:
     )
 
 
-def _serialize_placeholder_address() -> str:
-    return json.dumps(
-        {
-            "address_id": None,
-            "receiver_name": "未填写",
-            "receiver_phone": "未填写",
-            "province": "",
-            "city": "",
-            "district": "",
-            "detail_address": "未填写收货地址",
-        },
-        ensure_ascii=False,
-    )
-
-
 async def create_order(db: AsyncSession, payload: OrderCreate, buyer_id: int) -> Order:
-    product_result = await db.execute(select(Product).where(Product.id == payload.product_id).with_for_update())
+    product_result = await db.execute(select(Product).where(Product.id == payload.product_id))
     product = product_result.scalar_one_or_none()
     if product is None:
         raise ValueError("商品不存在")
@@ -93,19 +78,13 @@ async def create_order(db: AsyncSession, payload: OrderCreate, buyer_id: int) ->
     if category_is_active is not True:
         raise ValueError("商品所属分类已停用，暂不可下单")
 
-    if payload.address_id is not None:
-        address_result = await db.execute(
-            select(UserAddress).where(UserAddress.id == payload.address_id, UserAddress.user_id == buyer_id)
-        )
-        address = address_result.scalar_one_or_none()
-    else:
-        address_result = await db.execute(
-            select(UserAddress)
-            .where(UserAddress.user_id == buyer_id)
-            .order_by(UserAddress.is_default.desc(), UserAddress.id.desc())
-        )
-        address = address_result.scalars().first()
-    address_snapshot = _serialize_address(address) if address is not None else _serialize_placeholder_address()
+    address_result = await db.execute(
+        select(UserAddress).where(UserAddress.id == payload.address_id, UserAddress.user_id == buyer_id)
+    )
+    address = address_result.scalar_one_or_none()
+    if address is None:
+        raise ValueError("收货地址不存在或不属于当前买家")
+    address_snapshot = _serialize_address(address)
 
     quantity = payload.quantity
     if product.stock < quantity:
@@ -279,6 +258,8 @@ async def update_order_status(
     reason: str,
 ) -> Order:
     from_status = order.status
+    if status == OrderStatus.cancelled and (from_status != OrderStatus.pending_paid or order.pay_status != PayStatus.pending):
+        raise ValueError("仅待支付订单可取消")
     if not _can_transition(from_status, status):
         raise ValueError(f"非法状态流转: {from_status.value} -> {status.value}")
 
@@ -412,6 +393,8 @@ async def delete_order(db: AsyncSession, order: Order) -> None:
 
 
 async def restore_inventory_if_needed(db: AsyncSession, order: Order) -> bool:
+    await db.execute(select(Order.id).where(Order.id == order.id).with_for_update())
+    await db.refresh(order, attribute_names=["inventory_reverted"])
     if order.inventory_reverted:
         return False
 

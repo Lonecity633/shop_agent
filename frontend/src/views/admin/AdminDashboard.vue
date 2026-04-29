@@ -463,7 +463,7 @@ async function handleExecuteRefund(row, result) {
       fail_reason: result === 'failed' ? '模拟执行失败（管理员手动标记）' : '',
     })
     ElMessage.success(res.message || '退款执行完成')
-    await Promise.all([loadOverview(), loadRefundCases()])
+    await Promise.all([loadOverview(), loadRefundCases(), loadRecentOrders()])
   } catch (error) {
     ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '退款执行失败')
   } finally {

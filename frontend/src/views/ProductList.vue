@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { getAddresses } from '@/api/address'
 import { createOrder } from '@/api/order'
 import { addCartItem } from '@/api/cart'
 import { getCategories } from '@/api/category'
@@ -22,6 +23,9 @@ const creatingOrderId = ref(null)
 const orderDialogVisible = ref(false)
 const selectedProduct = ref(null)
 const orderForm = reactive({ quantity: 1 })
+const addresses = ref([])
+const selectedAddressId = ref(null)
+let stockRefreshTimer = null
 
 const favoriteProductIds = ref(new Set())
 
@@ -138,6 +142,25 @@ async function fetchFavorites() {
   }
 }
 
+async function fetchAddressesForOrder() {
+  if (!authStore.isLoggedIn) {
+    addresses.value = []
+    selectedAddressId.value = null
+    return
+  }
+  try {
+    const res = await getAddresses()
+    const list = res.data || []
+    addresses.value = list
+    const defaultAddress = list.find((item) => item.is_default)
+    selectedAddressId.value = (defaultAddress || list[0])?.id || null
+  } catch (error) {
+    addresses.value = []
+    selectedAddressId.value = null
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '加载地址失败')
+  }
+}
+
 function isFavorited(productId) {
   return favoriteProductIds.value.has(Number(productId))
 }
@@ -186,8 +209,13 @@ function handleReset() {
   fetchProducts()
 }
 
-function openOrderDialog(product) {
+async function openOrderDialog(product) {
   if (!ensureLoginForAction()) return
+  await fetchAddressesForOrder()
+  if (!addresses.value.length) {
+    ElMessage.warning('请先在地址管理中创建收货地址后再下单')
+    return
+  }
   selectedProduct.value = product
   orderForm.quantity = 1
   orderDialogVisible.value = true
@@ -195,10 +223,18 @@ function openOrderDialog(product) {
 
 async function handleCreateOrder() {
   if (!selectedProduct.value) return
+  if (!selectedAddressId.value) {
+    ElMessage.warning('请选择收货地址')
+    return
+  }
   const product = selectedProduct.value
   creatingOrderId.value = product.id
   try {
-    const res = await createOrder({ product_id: product.id, quantity: orderForm.quantity })
+    const res = await createOrder({
+      product_id: product.id,
+      quantity: orderForm.quantity,
+      address_id: Number(selectedAddressId.value),
+    })
     ElMessage.success(res.message || '下单成功')
     orderDialogVisible.value = false
     selectedProduct.value = null
@@ -210,10 +246,45 @@ async function handleCreateOrder() {
   }
 }
 
+async function refreshStorefrontOnVisible() {
+  if (document.visibilityState !== 'visible') return
+  await fetchProducts()
+  await fetchFavorites()
+}
+
+async function refreshStorefrontOnFocus() {
+  await fetchProducts()
+}
+
+function startStockRefreshTimer() {
+  stopStockRefreshTimer()
+  stockRefreshTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      fetchProducts()
+    }
+  }, 15000)
+}
+
+function stopStockRefreshTimer() {
+  if (stockRefreshTimer) {
+    window.clearInterval(stockRefreshTimer)
+    stockRefreshTimer = null
+  }
+}
+
 onMounted(async () => {
   await fetchCategories()
   await fetchProducts()
   await fetchFavorites()
+  document.addEventListener('visibilitychange', refreshStorefrontOnVisible)
+  window.addEventListener('focus', refreshStorefrontOnFocus)
+  startStockRefreshTimer()
+})
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', refreshStorefrontOnVisible)
+  window.removeEventListener('focus', refreshStorefrontOnFocus)
+  stopStockRefreshTimer()
 })
 </script>
 
@@ -310,6 +381,17 @@ onMounted(async () => {
           <div class="confirm-line">
             <span>数量</span>
             <el-input-number v-model="orderForm.quantity" :min="1" :max="Math.max(selectedProduct.stock || 1, 1)" />
+          </div>
+          <div class="confirm-line">
+            <span>收货地址</span>
+            <el-select v-model="selectedAddressId" placeholder="请选择收货地址" style="width: 260px">
+              <el-option
+                v-for="addr in addresses"
+                :key="addr.id"
+                :label="`${addr.receiver_name} ${addr.receiver_phone} ${addr.province}${addr.city}${addr.district || ''}${addr.detail_address}`"
+                :value="addr.id"
+              />
+            </el-select>
           </div>
           <div class="confirm-line total">
             <span>应付金额</span>

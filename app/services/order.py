@@ -4,7 +4,7 @@ from app.core.config import settings
 from app.core.rate_limit import is_rate_limited
 from app.crud import order as order_crud
 from app.crud import product as product_crud
-from app.models.order import OrderStatus
+from app.models.order import OrderStatus, PayStatus
 from app.models.user import User, UserRole
 from app.schemas.order import (
     OrderClosePayload,
@@ -66,6 +66,7 @@ async def close_order(db: AsyncSession, current_user: User, order_id: int, paylo
     await _ensure_order_access(db, current_user, order)
 
     ensure(current_user.role in {UserRole.admin, UserRole.buyer}, "ROLE_DENIED", "当前角色不可关闭订单", 403)
+    ensure(order.pay_status != PayStatus.paid, "ORDER_NOT_CLOSABLE", "已支付订单不可直接关闭，请走退款流程", 400)
     try:
         return await order_crud.close_order(db, order, current_user, payload.reason)
     except ValueError as exc:
@@ -92,6 +93,7 @@ async def patch_order_status(db: AsyncSession, current_user: User, order_id: int
     order = await order_crud.get_order_for_update(db, order_id)
     ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
     ensure(current_user.role == UserRole.buyer and order.user_id == current_user.id, "ORDER_FORBIDDEN", "仅订单买家可取消订单", 403)
+    ensure(order.status == OrderStatus.pending_paid, "ORDER_NOT_CANCELLABLE", "仅待支付订单可取消，已支付订单请走退款流程", 400)
 
     try:
         order = await order_crud.update_order_status(

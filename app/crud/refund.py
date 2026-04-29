@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.audit import append_audit
 from app.crud.order import restore_inventory_if_needed
-from app.models.order import Order, OrderStatus, PayStatus
+from app.models.order import Order, OrderStatus, OrderStatusLog, PayStatus
 from app.models.product import Product
 from app.models.refund import RefundStatus, RefundTicket
 from app.models.user import User, UserRole
@@ -193,16 +193,31 @@ async def execute_refund(
     )
 
     if result == "success":
+        if order is not None and order.pay_status not in {PayStatus.paid, PayStatus.refunded}:
+            raise ValueError("订单支付状态异常，拒绝执行退款")
+
         refund.status = RefundStatus.refunded
         refund.fail_reason = ""
         refund.processed_at = datetime.now(UTC)
 
         if order is not None:
-            if order.status in {OrderStatus.created, OrderStatus.pending_paid, OrderStatus.paid, OrderStatus.cancelled, OrderStatus.closed}:
-                await restore_inventory_if_needed(db, order)
-            order.status = OrderStatus.cancelled
+            from_status = order.status
+            # 退款成功后统一尝试回补库存；restore_inventory_if_needed 内部具备幂等保护。
+            await restore_inventory_if_needed(db, order)
             order.pay_status = PayStatus.refunded
             order.close_reason = "退款完成"
+            if from_status != OrderStatus.closed:
+                order.status = OrderStatus.closed
+                db.add(
+                    OrderStatusLog(
+                        order_id=order.id,
+                        from_status=from_status.value,
+                        to_status=OrderStatus.closed.value,
+                        actor_id=actor.id,
+                        actor_role=actor.role.value,
+                        reason="退款执行成功，订单关闭",
+                    )
+                )
         action = "refund_executed_success"
     else:
         refund.status = RefundStatus.refund_failed

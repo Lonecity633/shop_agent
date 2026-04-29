@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import ProductList from '@/views/ProductList.vue'
 import OrderList from '@/views/OrderList.vue'
 import CheckoutView from '@/views/CheckoutView.vue'
+import RefundCenter from '@/views/RefundCenter.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import ForbiddenView from '@/views/ForbiddenView.vue'
 import FavoritesView from '@/views/FavoritesView.vue'
@@ -19,6 +20,7 @@ const routes = [
   { path: '/cart', name: 'cart', component: CartView, meta: { requiresAuth: true, disallowAdmin: true, disallowSeller: true } },
   { path: '/orders', name: 'orders', component: OrderList, meta: { requiresAuth: true } },
   { path: '/checkout', name: 'checkout', component: CheckoutView, meta: { requiresAuth: true, disallowAdmin: true, disallowSeller: true } },
+  { path: '/refunds', name: 'refunds', component: RefundCenter, meta: { requiresAuth: true, disallowAdmin: true } },
   { path: '/profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true } },
   { path: '/admin/dashboard', name: 'admin-dashboard', component: AdminDashboard, meta: { requiresAuth: true, requiresAdmin: true } },
   { path: '/seller/center', name: 'seller-center', component: SellerCenter, meta: { requiresAuth: true, requiresSeller: true } },

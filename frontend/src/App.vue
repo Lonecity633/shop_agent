@@ -56,6 +56,16 @@ function goCart() {
   router.push('/cart')
 }
 
+function goCheckout() {
+  if (!ensureLogin('/checkout')) return
+  router.push('/checkout')
+}
+
+function goRefunds() {
+  if (!ensureLogin('/refunds')) return
+  router.push('/refunds')
+}
+
 function goRegister() {
   router.push('/register')
 }
@@ -97,6 +107,7 @@ function contactService() {
             <button class="nav-btn" @click="router.push('/seller/center')">店铺资料</button>
             <button class="nav-btn" @click="router.push('/seller/products')">我的商品</button>
             <button class="nav-btn" @click="router.push('/orders')">订单列表</button>
+            <button class="nav-btn" @click="goRefunds">退款工单</button>
           </nav>
           <nav class="right-nav">
             <button class="nav-btn" @click="goProfile">{{ displayName }}</button>
@@ -109,6 +120,7 @@ function contactService() {
             <button class="nav-btn" @click="goHome">商城首页</button>
             <button class="nav-btn" @click="goFavorites">我的收藏</button>
             <button class="nav-btn" @click="goOrders">我的订单</button>
+            <button class="nav-btn" @click="goRefunds">退款中心</button>
           </nav>
 
           <nav class="right-nav">
@@ -117,6 +129,7 @@ function contactService() {
             <button v-else class="nav-btn" @click="goProfile">你好，{{ displayName }}</button>
             <button v-if="!isLoggedIn" class="nav-btn" @click="goRegister">注册</button>
             <button v-else class="nav-btn" @click="handleLogout">退出</button>
+            <button class="nav-btn" @click="goCheckout">去结算</button>
             <button class="nav-btn cart-btn" @click="goCart">购物车</button>
           </nav>
         </template>

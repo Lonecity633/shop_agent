@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class OrderCreate(BaseModel):
     product_id: int = Field(..., gt=0, description="商品ID")
-    address_id: int | None = Field(default=None, gt=0, description="地址ID")
+    address_id: int = Field(..., gt=0, description="地址ID")
     quantity: int = Field(default=1, ge=1, le=99, description="购买数量")
 
 

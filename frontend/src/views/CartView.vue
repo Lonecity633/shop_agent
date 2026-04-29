@@ -2,15 +2,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { createOrder } from '@/api/order'
 import { getCartItems, removeCartItem, updateCartItem } from '@/api/cart'
 
 const router = useRouter()
 const loading = ref(false)
-const placingItemId = ref(null)
 const items = ref([])
 
 const hasItems = computed(() => items.value.length > 0)
+const selectedCount = computed(() => items.value.filter((i) => i.selected).length)
 const totalAmount = computed(() => {
   return items.value
     .filter((i) => i.selected)
@@ -66,19 +65,12 @@ async function handleDelete(item) {
   }
 }
 
-async function handleOrder(item) {
-  placingItemId.value = item.id
-  try {
-    await createOrder({ product_id: item.product_id, quantity: item.quantity })
-    await removeCartItem(item.id)
-    ElMessage.success('下单成功')
-    await fetchCart()
-    router.push('/orders')
-  } catch (error) {
-    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '下单失败')
-  } finally {
-    placingItemId.value = null
+function goCheckout() {
+  if (!selectedCount.value) {
+    ElMessage.warning('请先勾选至少一个商品')
+    return
   }
+  router.push('/checkout')
 }
 
 onMounted(fetchCart)
@@ -88,7 +80,10 @@ onMounted(fetchCart)
   <div class="cart-page">
     <div class="cart-head">
       <h2>购物车</h2>
-      <div class="summary">已选总额：<strong>¥{{ formatPrice(totalAmount) }}</strong></div>
+      <div class="head-actions">
+        <div class="summary">已选 {{ selectedCount }} 项，总额：<strong>¥{{ formatPrice(totalAmount) }}</strong></div>
+        <el-button type="danger" :disabled="!selectedCount" @click="goCheckout">去结算</el-button>
+      </div>
     </div>
 
     <el-table v-loading="loading" :data="items" border stripe>
@@ -121,19 +116,9 @@ onMounted(fetchCart)
       <el-table-column label="小计" width="120">
         <template #default="scope">¥{{ formatPrice(Number(scope.row.product.price) * Number(scope.row.quantity)) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
+      <el-table-column label="操作" width="120" fixed="right">
         <template #default="scope">
-          <div class="row-actions">
-            <el-button
-              type="primary"
-              :disabled="!scope.row.selected"
-              :loading="placingItemId === scope.row.id"
-              @click="handleOrder(scope.row)"
-            >
-              下单
-            </el-button>
-            <el-button type="danger" plain @click="handleDelete(scope.row)">删除</el-button>
-          </div>
+          <el-button type="danger" plain @click="handleDelete(scope.row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -152,6 +137,13 @@ onMounted(fetchCart)
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 10px;
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .summary {
@@ -180,8 +172,11 @@ onMounted(fetchCart)
   font-weight: 600;
 }
 
-.row-actions {
-  display: flex;
-  gap: 8px;
+@media (max-width: 768px) {
+  .cart-head,
+  .head-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>
