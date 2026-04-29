@@ -3,13 +3,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routers.auth import get_current_user
 from app.core.errors import raise_error
-from app.crud import refund as refund_crud
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.common import APIResponse
 from app.schemas.refund import RefundCreate, RefundOut, RefundSellerReview
+from app.services import refund as refund_service
+from app.services.common import ServiceError
 
 router = APIRouter(prefix="/refunds", tags=["Refunds"])
+
+
+def _handle_error(exc: ServiceError):
+    raise_error(exc.code, exc.message, status_code=exc.status_code)
 
 
 @router.get("", response_model=APIResponse[list[RefundOut]])
@@ -17,7 +22,10 @@ async def list_refunds(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    data = await refund_crud.list_refunds_by_role(db, current_user)
+    try:
+        data = await refund_service.list_refunds(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "退款单列表获取成功", "data": data}
 
 
@@ -27,15 +35,10 @@ async def get_refund(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    data = await refund_crud.get_refund(db, refund_id)
-    if not data:
-        raise_error("REFUND_NOT_FOUND", "退款单不存在", status_code=404)
-
-    if current_user.role == UserRole.buyer and data.buyer_id != current_user.id:
-        raise_error("REFUND_FORBIDDEN", "无权限查看该退款单", status_code=403)
-    if current_user.role == UserRole.seller and data.seller_id != current_user.id:
-        raise_error("REFUND_FORBIDDEN", "无权限查看该退款单", status_code=403)
-
+    try:
+        data = await refund_service.get_refund(db, current_user, refund_id)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "退款单获取成功", "data": data}
 
 
@@ -45,15 +48,10 @@ async def create_refund(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role != UserRole.buyer:
-        raise_error("ROLE_DENIED", "仅买家可申请退款", status_code=403)
-
     try:
-        data = await refund_crud.create_refund(db, payload, current_user)
-    except PermissionError as exc:
-        raise_error("REFUND_FORBIDDEN", str(exc), status_code=403)
-    except ValueError as exc:
-        raise_error("REFUND_CREATE_FAILED", str(exc), status_code=400)
+        data = await refund_service.create_refund(db, current_user, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "退款申请提交成功", "data": data}
 
 
@@ -64,17 +62,8 @@ async def seller_review_refund(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role != UserRole.seller:
-        raise_error("ROLE_DENIED", "仅卖家可审核退款", status_code=403)
-
-    refund = await refund_crud.get_refund(db, refund_id)
-    if not refund:
-        raise_error("REFUND_NOT_FOUND", "退款单不存在", status_code=404)
-    if refund.seller_id != current_user.id:
-        raise_error("REFUND_FORBIDDEN", "仅订单所属卖家可审核退款", status_code=403)
-
     try:
-        data = await refund_crud.seller_review_refund(db, refund, current_user, payload.action, payload.seller_note)
-    except ValueError as exc:
-        raise_error("REFUND_REVIEW_FAILED", str(exc), status_code=400)
+        data = await refund_service.seller_review_refund(db, current_user, refund_id, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "退款审核完成", "data": data}

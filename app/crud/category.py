@@ -81,3 +81,40 @@ async def count_products_by_category(db: AsyncSession, category_id: int) -> int:
 async def delete_category(db: AsyncSession, category: Category) -> None:
     await db.delete(category)
     await db.commit()
+
+
+async def ensure_fallback_category(
+    db: AsyncSession,
+    *,
+    fallback_name: str,
+    fallback_sort_order: int = 9999,
+) -> Category:
+    category = await get_category_by_name(db, fallback_name)
+    if category is None:
+        category = Category(
+            name=fallback_name,
+            sort_order=fallback_sort_order,
+            is_active=True,
+        )
+        db.add(category)
+        await db.flush()
+    elif not category.is_active:
+        category.is_active = True
+        await db.flush()
+    return category
+
+
+async def reassign_products_category(
+    db: AsyncSession,
+    *,
+    source_category_id: int,
+    target_category_id: int,
+) -> int:
+    result = await db.execute(
+        select(Product).where(Product.category_id == source_category_id)
+    )
+    products = result.scalars().all()
+    for product in products:
+        product.category_id = target_category_id
+    await db.flush()
+    return len(products)

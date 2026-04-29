@@ -1,20 +1,20 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routers.auth import get_current_user
 from app.core.errors import raise_error
-from app.crud import favorite as favorite_crud
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.common import APIResponse
 from app.schemas.favorite import FavoriteCreate, FavoriteOut
+from app.services import favorite as favorite_service
+from app.services.common import ServiceError
 
 router = APIRouter(prefix="/favorites", tags=["Favorites"])
 
 
-def _ensure_buyer(current_user: User) -> None:
-    if current_user.role != UserRole.buyer:
-        raise_error("ROLE_DENIED", "仅买家可使用收藏功能", status_code=status.HTTP_403_FORBIDDEN)
+def _handle_error(exc: ServiceError):
+    raise_error(exc.code, exc.message, status_code=exc.status_code)
 
 
 @router.get("", response_model=APIResponse[list[FavoriteOut]], summary="收藏列表")
@@ -22,8 +22,10 @@ async def list_favorites(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_buyer(current_user)
-    favorites = await favorite_crud.list_favorites(db, current_user.id)
+    try:
+        favorites = await favorite_service.list_favorites(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "收藏列表获取成功", "data": favorites}
 
 
@@ -33,11 +35,10 @@ async def add_favorite(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_buyer(current_user)
     try:
-        favorite = await favorite_crud.add_favorite(db, current_user.id, payload.product_id)
-    except ValueError as exc:
-        raise_error("FAVORITE_CREATE_FAILED", str(exc), status_code=400)
+        favorite = await favorite_service.add_favorite(db, current_user, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "收藏成功", "data": favorite}
 
 
@@ -47,8 +48,10 @@ async def remove_favorite(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_buyer(current_user)
-    removed = await favorite_crud.remove_favorite(db, current_user.id, product_id)
+    try:
+        removed = await favorite_service.remove_favorite(db, current_user, product_id)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {
         "code": "OK",
         "message": "取消收藏成功" if removed else "该商品未收藏",

@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.favorite import Favorite
+from app.models.category import Category
 from app.models.product import Product, ProductStatus
 
 
@@ -10,7 +11,11 @@ async def list_favorites(db: AsyncSession, user_id: int) -> list[Favorite]:
     result = await db.execute(
         select(Favorite)
         .options(selectinload(Favorite.product).selectinload(Product.category))
-        .where(Favorite.user_id == user_id)
+        .where(
+            Favorite.user_id == user_id,
+            Favorite.product.has(Product.is_deleted.is_(False)),
+            Favorite.product.has(Product.category.has(Category.is_active.is_(True))),
+        )
         .order_by(Favorite.id.desc())
     )
     return list(result.scalars().all())
@@ -33,12 +38,20 @@ async def add_favorite(db: AsyncSession, user_id: int, product_id: int) -> Favor
         )
         return result.scalar_one()
 
-    product_result = await db.execute(select(Product).where(Product.id == product_id))
+    product_result = await db.execute(
+        select(Product)
+        .options(selectinload(Product.category))
+        .where(Product.id == product_id)
+    )
     product = product_result.scalar_one_or_none()
     if product is None:
         raise ValueError("商品不存在")
+    if product.is_deleted:
+        raise ValueError("商品已下架，无法收藏")
     if product.approval_status != ProductStatus.approved:
         raise ValueError("商品不可收藏")
+    if product.category is None or not product.category.is_active:
+        raise ValueError("商品所属分类已停用，暂不可收藏")
 
     favorite = Favorite(user_id=user_id, product_id=product_id)
     db.add(favorite)
@@ -59,3 +72,11 @@ async def remove_favorite(db: AsyncSession, user_id: int, product_id: int) -> bo
     await db.delete(favorite)
     await db.commit()
     return True
+
+
+async def remove_favorites_by_product(db: AsyncSession, product_id: int) -> int:
+    result = await db.execute(select(Favorite).where(Favorite.product_id == product_id))
+    items = result.scalars().all()
+    for item in items:
+        await db.delete(item)
+    return len(items)

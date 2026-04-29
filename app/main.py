@@ -13,12 +13,21 @@ from app.db.init_db import init_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if (
+        settings.jwt_require_strong_secret
+        and settings.app_env != "dev"
+        and settings.jwt_secret_key == "change-this-in-production"
+    ):
+        raise RuntimeError("jwt_secret_key 使用了默认值，请在非开发环境中配置强密钥")
+
     await init_db()
     app.state.redis_available = True
     try:
         await init_redis()
     except Exception:
         app.state.redis_available = False
+        if settings.auth_fail_closed:
+            raise RuntimeError("Redis 初始化失败，auth_fail_closed=true，服务拒绝启动")
     yield
     await close_redis()
 

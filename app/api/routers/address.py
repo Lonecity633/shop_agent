@@ -3,18 +3,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routers.auth import get_current_user
 from app.core.errors import raise_error
-from app.crud import address as address_crud
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.address import AddressCreate, AddressOut, AddressUpdate
 from app.schemas.common import APIResponse
+from app.services import address as address_service
+from app.services.common import ServiceError
 
 router = APIRouter(prefix="/addresses", tags=["Addresses"])
 
 
-def ensure_buyer(user: User) -> None:
-    if user.role != UserRole.buyer:
-        raise_error("ROLE_DENIED", "仅买家可管理收货地址", status_code=403)
+def _handle_error(exc: ServiceError):
+    raise_error(exc.code, exc.message, status_code=exc.status_code)
 
 
 @router.get("", response_model=APIResponse[list[AddressOut]])
@@ -22,8 +22,10 @@ async def list_addresses(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ensure_buyer(current_user)
-    data = await address_crud.list_addresses(db, current_user.id)
+    try:
+        data = await address_service.list_addresses(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "地址列表获取成功", "data": data}
 
 
@@ -33,8 +35,10 @@ async def create_address(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ensure_buyer(current_user)
-    data = await address_crud.create_address(db, current_user.id, payload)
+    try:
+        data = await address_service.create_address(db, current_user, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "地址创建成功", "data": data}
 
 
@@ -45,12 +49,11 @@ async def update_address(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ensure_buyer(current_user)
-    address = await address_crud.get_address(db, address_id)
-    if not address or address.user_id != current_user.id:
-        raise_error("ADDRESS_NOT_FOUND", "地址不存在", status_code=404)
+    try:
+        data = await address_service.update_address(db, current_user, address_id, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
 
-    data = await address_crud.update_address(db, address, payload)
     return {"code": "OK", "message": "地址更新成功", "data": data}
 
 
@@ -60,10 +63,9 @@ async def delete_address(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ensure_buyer(current_user)
-    address = await address_crud.get_address(db, address_id)
-    if not address or address.user_id != current_user.id:
-        raise_error("ADDRESS_NOT_FOUND", "地址不存在", status_code=404)
+    try:
+        await address_service.delete_address(db, current_user, address_id)
+    except ServiceError as exc:
+        _handle_error(exc)
 
-    await address_crud.delete_address(db, address)
     return {"code": "OK", "message": "地址删除成功", "data": {"address_id": address_id}}

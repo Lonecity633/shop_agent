@@ -3,21 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routers.auth import get_current_user
 from app.core.errors import raise_error
-from app.crud import category as category_crud
-from app.crud.admin import (
-    get_admin_overview,
-    list_orders_paged,
-    list_pending_products,
-    list_recent_orders,
-    list_refund_cases,
-    list_refund_cases_paged,
-    list_sellers_with_stats,
-)
-from app.crud.audit import list_timeline
-from app.crud.refund import admin_review_refund, execute_refund, get_refund
-from app.crud.seller import audit_seller_profile, get_seller_profile_by_id, list_pending_seller_profiles
 from app.db.session import get_db
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.admin import (
     AdminOrderOut,
     AdminOverviewOut,
@@ -29,17 +16,17 @@ from app.schemas.admin import (
     SellerInfoOut,
     SellerProfileAuditUpdate,
 )
-from app.schemas.common import APIResponse, PagedData
 from app.schemas.category import CategoryCreate, CategoryOut, CategoryStatusUpdate, CategoryUpdate
+from app.schemas.common import APIResponse, PagedData
 from app.schemas.refund import RefundAdminReview, RefundExecutePayload, RefundOut
+from app.services import admin as admin_service
+from app.services.common import ServiceError
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
-SYSTEM_FALLBACK_CATEGORY = "其他"
 
 
-def _ensure_admin(current_user: User) -> None:
-    if current_user.role != UserRole.admin:
-        raise_error("ROLE_DENIED", "仅管理员可访问", status_code=403)
+def _handle_error(exc: ServiceError):
+    raise_error(exc.code, exc.message, status_code=exc.status_code)
 
 
 @router.get("/categories", response_model=APIResponse[list[CategoryOut]], summary="管理员查看分类列表")
@@ -47,8 +34,10 @@ async def get_categories_admin(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    data = await category_crud.list_all_categories(db)
+    try:
+        data = await admin_service.get_categories_admin(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "分类列表获取成功", "data": data}
 
 
@@ -58,13 +47,10 @@ async def create_category_admin(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    if payload.name == SYSTEM_FALLBACK_CATEGORY and not payload.is_active:
-        raise_error("CATEGORY_DISABLE_FORBIDDEN", "系统保底分类“其他”必须保持启用", status_code=400)
-    existing = await category_crud.get_category_by_name(db, payload.name)
-    if existing:
-        raise_error("CATEGORY_NAME_DUPLICATED", "分类名称已存在", status_code=400)
-    data = await category_crud.create_category(db, payload)
+    try:
+        data = await admin_service.create_category_admin(db, current_user, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "分类创建成功", "data": data}
 
 
@@ -75,19 +61,10 @@ async def update_category_admin(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    category = await category_crud.get_category_by_id(db, category_id)
-    if not category:
-        raise_error("CATEGORY_NOT_FOUND", "分类不存在", status_code=404)
-
-    if payload.name is not None:
-        if category.name == SYSTEM_FALLBACK_CATEGORY and payload.name != SYSTEM_FALLBACK_CATEGORY:
-            raise_error("CATEGORY_UPDATE_FORBIDDEN", "系统保底分类“其他”不允许改名", status_code=400)
-        existing = await category_crud.get_category_by_name(db, payload.name)
-        if existing and existing.id != category.id:
-            raise_error("CATEGORY_NAME_DUPLICATED", "分类名称已存在", status_code=400)
-
-    data = await category_crud.update_category(db, category, payload)
+    try:
+        data = await admin_service.update_category_admin(db, current_user, category_id, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "分类更新成功", "data": data}
 
 
@@ -98,13 +75,10 @@ async def update_category_status_admin(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    category = await category_crud.get_category_by_id(db, category_id)
-    if not category:
-        raise_error("CATEGORY_NOT_FOUND", "分类不存在", status_code=404)
-    if category.name == SYSTEM_FALLBACK_CATEGORY and not payload.is_active:
-        raise_error("CATEGORY_DISABLE_FORBIDDEN", "系统保底分类“其他”不允许停用", status_code=400)
-    data = await category_crud.set_category_status(db, category, payload.is_active)
+    try:
+        data = await admin_service.update_category_status_admin(db, current_user, category_id, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "分类状态更新成功", "data": data}
 
 
@@ -114,17 +88,11 @@ async def delete_category_admin(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    category = await category_crud.get_category_by_id(db, category_id)
-    if not category:
-        raise_error("CATEGORY_NOT_FOUND", "分类不存在", status_code=404)
-    if category.name == SYSTEM_FALLBACK_CATEGORY:
-        raise_error("CATEGORY_DELETE_FORBIDDEN", "系统保底分类“其他”不允许删除", status_code=400)
-    used_count = await category_crud.count_products_by_category(db, category_id)
-    if used_count > 0:
-        raise_error("CATEGORY_IN_USE", "分类下仍有商品，无法删除", status_code=400)
-    await category_crud.delete_category(db, category)
-    return {"code": "OK", "message": "分类删除成功", "data": {"category_id": category_id}}
+    try:
+        data = await admin_service.delete_category_admin(db, current_user, category_id)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "分类删除成功", "data": data}
 
 
 @router.get("/overview", response_model=APIResponse[AdminOverviewOut], summary="管理员运营总览")
@@ -132,8 +100,10 @@ async def get_overview(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    data = await get_admin_overview(db)
+    try:
+        data = await admin_service.get_overview(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "运营总览获取成功", "data": data}
 
 
@@ -142,8 +112,10 @@ async def get_sellers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    data = await list_sellers_with_stats(db)
+    try:
+        data = await admin_service.get_sellers(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "卖家列表获取成功", "data": data}
 
 
@@ -156,8 +128,10 @@ async def get_pending_products(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    data = await list_pending_products(db)
+    try:
+        data = await admin_service.get_pending_products(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "待审核商品列表获取成功", "data": data}
 
 
@@ -170,8 +144,10 @@ async def get_pending_seller_profiles(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    data = await list_pending_seller_profiles(db)
+    try:
+        data = await admin_service.get_pending_seller_profiles(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "待审核卖家资料获取成功", "data": data}
 
 
@@ -181,8 +157,10 @@ async def get_recent_orders(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    data = await list_recent_orders(db, limit=limit)
+    try:
+        data = await admin_service.get_recent_orders(db, current_user, limit)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "最近订单获取成功", "data": data}
 
 
@@ -193,8 +171,10 @@ async def get_refund_cases(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    data = await list_refund_cases(db, status=status, limit=limit)
+    try:
+        data = await admin_service.get_refund_cases(db, current_user, status, limit)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "退款工单列表获取成功", "data": data}
 
 
@@ -208,15 +188,18 @@ async def get_orders_paged(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    data = await list_orders_paged(
-        db,
-        page=page,
-        page_size=page_size,
-        status=status,
-        pay_status=pay_status,
-        keyword=keyword,
-    )
+    try:
+        data = await admin_service.get_orders_paged(
+            db,
+            current_user,
+            page=page,
+            page_size=page_size,
+            status=status,
+            pay_status=pay_status,
+            keyword=keyword,
+        )
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "订单监控列表获取成功", "data": data}
 
 
@@ -229,8 +212,17 @@ async def get_refunds_paged(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    data = await list_refund_cases_paged(db, page=page, page_size=page_size, status=status, keyword=keyword)
+    try:
+        data = await admin_service.get_refunds_paged(
+            db,
+            current_user,
+            page=page,
+            page_size=page_size,
+            status=status,
+            keyword=keyword,
+        )
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "退款工单分页列表获取成功", "data": data}
 
 
@@ -246,10 +238,16 @@ async def get_operation_timeline(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    if entity_type not in {"order", "refund"}:
-        raise_error("ENTITY_TYPE_INVALID", "仅支持 order/refund 时间线", status_code=400)
-    data = await list_timeline(db, entity_type=entity_type, entity_id=entity_id, limit=limit)
+    try:
+        data = await admin_service.get_operation_timeline(
+            db,
+            current_user,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            limit=limit,
+        )
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "时间线获取成功", "data": data}
 
 
@@ -264,11 +262,15 @@ async def patch_seller_profile_audit(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    profile = await get_seller_profile_by_id(db, profile_id)
-    if not profile:
-        raise_error("SELLER_PROFILE_NOT_FOUND", "卖家资料不存在", status_code=404)
-    profile = await audit_seller_profile(db, profile, payload.approval_status)
+    try:
+        profile = await admin_service.patch_seller_profile_audit(
+            db,
+            current_user,
+            profile_id=profile_id,
+            payload=payload,
+        )
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "卖家资料审核成功", "data": profile}
 
 
@@ -279,15 +281,15 @@ async def arbitrate_refund(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    refund = await get_refund(db, refund_id)
-    if not refund:
-        raise_error("REFUND_NOT_FOUND", "退款单不存在", status_code=404)
-
     try:
-        refund = await admin_review_refund(db, refund, current_user, payload.action, payload.admin_note)
-    except ValueError as exc:
-        raise_error("REFUND_ARBITRATE_FAILED", str(exc), status_code=400)
+        refund = await admin_service.arbitrate_refund(
+            db,
+            current_user,
+            refund_id=refund_id,
+            payload=payload,
+        )
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "退款仲裁完成", "data": refund}
 
 
@@ -298,18 +300,13 @@ async def execute_refund_payment(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ensure_admin(current_user)
-    refund = await get_refund(db, refund_id)
-    if not refund:
-        raise_error("REFUND_NOT_FOUND", "退款单不存在", status_code=404)
     try:
-        refund = await execute_refund(
+        refund = await admin_service.execute_refund_payment(
             db,
-            refund,
-            actor=current_user,
-            result=payload.result,
-            fail_reason=payload.fail_reason,
+            current_user,
+            refund_id=refund_id,
+            payload=payload,
         )
-    except ValueError as exc:
-        raise_error("REFUND_EXECUTE_FAILED", str(exc), status_code=400)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"code": "OK", "message": "退款执行完成", "data": refund}

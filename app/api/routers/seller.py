@@ -1,12 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routers.auth import get_current_user
-from app.crud import product as product_crud
-from app.crud.seller import get_seller_profile_by_user_id, upsert_seller_profile
+from app.core.errors import raise_error
 from app.db.session import get_db
-from app.models.seller_profile import SellerAuditStatus
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.common import APIResponse
 from app.schemas.seller import (
     SellerProductCreate,
@@ -15,13 +13,14 @@ from app.schemas.seller import (
     SellerProfileOut,
     SellerProfileUpsert,
 )
+from app.services import seller as seller_service
+from app.services.common import ServiceError
 
 router = APIRouter(prefix="/seller", tags=["Seller"])
 
 
-def ensure_seller(current_user: User) -> None:
-    if current_user.role != UserRole.seller:
-        raise HTTPException(status_code=403, detail="仅商家可访问")
+def _handle_error(exc: ServiceError):
+    raise_error(exc.code, exc.message, status_code=exc.status_code)
 
 
 @router.get("/profile", response_model=APIResponse[SellerProfileOut | None], summary="获取商家店铺资料")
@@ -29,8 +28,10 @@ async def get_profile(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ensure_seller(current_user)
-    profile = await get_seller_profile_by_user_id(db, current_user.id)
+    try:
+        profile = await seller_service.get_profile(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"message": "商家资料获取成功", "data": profile}
 
 
@@ -40,8 +41,10 @@ async def put_profile(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ensure_seller(current_user)
-    profile = await upsert_seller_profile(db, current_user.id, payload)
+    try:
+        profile = await seller_service.put_profile(db, current_user, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"message": "商家资料保存成功", "data": profile}
 
 
@@ -51,18 +54,10 @@ async def create_my_product(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ensure_seller(current_user)
-    profile = await get_seller_profile_by_user_id(db, current_user.id)
-    if profile is None:
-        raise HTTPException(status_code=400, detail="请先完善店铺资料并通过审核")
-    if profile.audit_status != SellerAuditStatus.approved:
-        raise HTTPException(status_code=403, detail="店铺资料未通过审核，暂不可上架")
-    if not profile.is_active:
-        raise HTTPException(status_code=403, detail="店铺已停用，暂不可上架")
     try:
-        product = await product_crud.create_product(db, payload, seller_id=current_user.id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        product = await seller_service.create_my_product(db, current_user, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"message": "商品创建成功，待审核", "data": product}
 
 
@@ -71,8 +66,10 @@ async def list_my_products(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ensure_seller(current_user)
-    products = await product_crud.list_products_by_role(db, current_user)
+    try:
+        products = await seller_service.list_my_products(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"message": "我的商品列表获取成功", "data": products}
 
 
@@ -83,16 +80,10 @@ async def update_my_product(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ensure_seller(current_user)
-    product = await product_crud.get_product(db, product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="商品不存在")
-    if product.seller_id != current_user.id:
-        raise HTTPException(status_code=403, detail="只能更新自己的商品")
     try:
-        product = await product_crud.update_product(db, product, payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        product = await seller_service.update_my_product(db, current_user, product_id, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"message": "商品更新成功，已重新进入待审核", "data": product}
 
 
@@ -102,11 +93,8 @@ async def delete_my_product(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ensure_seller(current_user)
-    product = await product_crud.get_product(db, product_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="商品不存在")
-    if product.seller_id != current_user.id:
-        raise HTTPException(status_code=403, detail="只能删除自己的商品")
-    await product_crud.delete_product(db, product)
+    try:
+        await seller_service.delete_my_product(db, current_user, product_id)
+    except ServiceError as exc:
+        _handle_error(exc)
     return {"message": "商品删除成功", "data": {"product_id": product_id}}

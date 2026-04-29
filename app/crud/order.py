@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.crud.audit import append_audit
+from app.models.category import Category
 from app.models.address import UserAddress
 from app.models.comment import Comment
 from app.models.order import Order, OrderItem, OrderStatus, OrderStatusLog, PayStatus
@@ -83,8 +84,14 @@ async def create_order(db: AsyncSession, payload: OrderCreate, buyer_id: int) ->
     product = product_result.scalar_one_or_none()
     if product is None:
         raise ValueError("商品不存在")
+    if product.is_deleted:
+        raise ValueError("商品已下架，暂不可下单")
     if product.approval_status != ProductStatus.approved:
         raise ValueError("商品未审核通过，暂不可下单")
+    category_result = await db.execute(select(Category.is_active).where(Category.id == product.category_id))
+    category_is_active = category_result.scalar_one_or_none()
+    if category_is_active is not True:
+        raise ValueError("商品所属分类已停用，暂不可下单")
 
     if payload.address_id is not None:
         address_result = await db.execute(
@@ -253,6 +260,13 @@ async def list_orders_by_role(db: AsyncSession, current_user: User) -> list[Orde
 async def get_order(db: AsyncSession, order_id: int) -> Order | None:
     result = await db.execute(
         select(Order).options(selectinload(Order.items)).where(Order.id == order_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_order_for_update(db: AsyncSession, order_id: int) -> Order | None:
+    result = await db.execute(
+        select(Order).options(selectinload(Order.items)).where(Order.id == order_id).with_for_update()
     )
     return result.scalar_one_or_none()
 

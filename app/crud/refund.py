@@ -17,6 +17,11 @@ async def get_refund(db: AsyncSession, refund_id: int) -> RefundTicket | None:
     return result.scalar_one_or_none()
 
 
+async def get_refund_for_update(db: AsyncSession, refund_id: int) -> RefundTicket | None:
+    result = await db.execute(select(RefundTicket).where(RefundTicket.id == refund_id).with_for_update())
+    return result.scalar_one_or_none()
+
+
 async def list_refunds_by_role(db: AsyncSession, current_user: User) -> list[RefundTicket]:
     stmt = select(RefundTicket).order_by(RefundTicket.id.desc())
     if current_user.role == UserRole.buyer:

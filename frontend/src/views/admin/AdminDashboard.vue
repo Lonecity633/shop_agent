@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   arbitrateRefund,
   auditProduct,
@@ -381,10 +381,17 @@ async function toggleCategoryStatus(row, targetStatus) {
 async function handleDeleteCategory(row) {
   categoryLoadingId.value = row.id
   try {
+    await ElMessageBox.confirm(
+      `确认删除分类「${row.name}」吗？该分类下商品将自动迁移到“其他”。`,
+      '删除分类',
+      { type: 'warning' }
+    )
     const res = await deleteAdminCategory(row.id)
-    ElMessage.success(res.message || '分类删除成功')
+    const migratedCount = Number(res?.data?.migrated_product_count || 0)
+    ElMessage.success(`${res.message || '分类删除成功'}，已迁移 ${migratedCount} 个商品到“其他”`)
     await loadCategories()
   } catch (error) {
+    if (error === 'cancel' || error === 'close') return
     ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '分类删除失败')
   } finally {
     categoryLoadingId.value = null

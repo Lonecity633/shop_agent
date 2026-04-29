@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     login_rate_limit_window_seconds: int = 60
     order_rate_limit_count: int = 20
     order_rate_limit_window_seconds: int = 60
+    auth_fail_closed: bool = True
+    jwt_require_strong_secret: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

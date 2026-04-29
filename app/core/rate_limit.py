@@ -13,4 +13,6 @@ async def is_rate_limited(key: str, limit: int, window_seconds: int) -> bool:
             await redis.expire(namespaced, window_seconds)
         return current > limit
     except (RedisError, RuntimeError):
+        if settings.auth_fail_closed:
+            raise RuntimeError("Rate limit backend unavailable")
         return False

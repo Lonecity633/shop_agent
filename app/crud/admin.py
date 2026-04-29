@@ -1,6 +1,6 @@
 import json
 
-from sqlalchemy import String, case, cast, func, or_, select
+from sqlalchemy import String, and_, case, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -19,8 +19,8 @@ async def list_sellers_with_stats(db: AsyncSession) -> list[dict]:
             User.email,
             SellerProfile.audit_status.label("shop_audit_status"),
             User.created_at,
-            func.count(Product.id).label("total_products"),
-            func.sum(case((Product.approval_status == ProductStatus.pending, 1), else_=0)).label(
+            func.sum(case((Product.is_deleted.is_(False), 1), else_=0)).label("total_products"),
+            func.sum(case((and_(Product.approval_status == ProductStatus.pending, Product.is_deleted.is_(False)), 1), else_=0)).label(
                 "pending_products"
             ),
         )
@@ -64,7 +64,7 @@ async def list_pending_products(db: AsyncSession) -> list[dict]:
         .join(User, User.id == Product.seller_id)
         .outerjoin(Category, Category.id == Product.category_id)
         .outerjoin(SellerProfile, SellerProfile.user_id == User.id)
-        .where(Product.approval_status == ProductStatus.pending)
+        .where(Product.approval_status == ProductStatus.pending, Product.is_deleted.is_(False))
         .order_by(Product.id.desc())
     )
     result = await db.execute(stmt)
@@ -111,7 +111,10 @@ async def get_admin_overview(db: AsyncSession) -> dict:
 
     pending_profiles_stmt = select(func.count(SellerProfile.id)).where(SellerProfile.audit_status == SellerAuditStatus.pending)
     pending_profiles_count = (await db.execute(pending_profiles_stmt)).scalar_one()
-    pending_products_stmt = select(func.count(Product.id)).where(Product.approval_status == ProductStatus.pending)
+    pending_products_stmt = select(func.count(Product.id)).where(
+        Product.approval_status == ProductStatus.pending,
+        Product.is_deleted.is_(False),
+    )
     pending_products_count = (await db.execute(pending_products_stmt)).scalar_one()
 
     order_stats_stmt = select(

@@ -65,6 +65,9 @@ uvicorn app.main:app --reload
 - `POST /api/v1/orders/{order_id}/comments` 买家评论
 - `GET /api/v1/orders/{order_id}/logs` 订单状态变更审计日志
 - `GET /api/v1/admin/seller-profiles/pending`、`PATCH /api/v1/admin/seller-profiles/{id}/audit` 卖家资料审核
+- `POST /api/v1/support/kb/documents`、`GET /api/v1/support/kb/documents` 客服知识库文档管理
+- `POST /api/v1/support/sessions/{session_id}/messages`、`GET /api/v1/support/sessions/{session_id}/messages` 客服会话消息
+- `GET /api/v1/support/sessions/{session_id}/evidence` 客服检索证据链
 
 统一返回结构：
 
