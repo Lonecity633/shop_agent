@@ -7,6 +7,7 @@ import ProfileView from '@/views/ProfileView.vue'
 import ForbiddenView from '@/views/ForbiddenView.vue'
 import FavoritesView from '@/views/FavoritesView.vue'
 import CartView from '@/views/CartView.vue'
+import SupportChatView from '@/views/SupportChatView.vue'
 import AdminDashboard from '@/views/admin/AdminDashboard.vue'
 import SellerCenter from '@/views/seller/SellerCenter.vue'
 import MyProducts from '@/views/seller/MyProducts.vue'
@@ -21,6 +22,7 @@ const routes = [
   { path: '/orders', name: 'orders', component: OrderList, meta: { requiresAuth: true } },
   { path: '/checkout', name: 'checkout', component: CheckoutView, meta: { requiresAuth: true, disallowAdmin: true, disallowSeller: true } },
   { path: '/refunds', name: 'refunds', component: RefundCenter, meta: { requiresAuth: true, disallowAdmin: true } },
+  { path: '/support/chat', name: 'support-chat', component: SupportChatView, meta: { requiresAuth: true, disallowAdmin: true, disallowSeller: true } },
   { path: '/profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true } },
   { path: '/admin/dashboard', name: 'admin-dashboard', component: AdminDashboard, meta: { requiresAuth: true, requiresAdmin: true } },
   { path: '/seller/center', name: 'seller-center', component: SellerCenter, meta: { requiresAuth: true, requiresSeller: true } },
@@ -54,7 +56,7 @@ router.beforeEach((to) => {
   if (to.meta.requiresSeller && role !== 'seller') return { path: '/403' }
   if (to.meta.disallowAdmin && role === 'admin') return { path: roleHome(role) }
   if (to.meta.disallowSeller && role === 'seller') return { path: roleHome(role) }
-  if (to.meta.guestOnly && token) return { path: roleHome(role) }
+  if (to.meta.guestOnly && token && user) return { path: roleHome(role) }
 
   return true
 })

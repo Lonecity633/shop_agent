@@ -1,14 +1,12 @@
 import json
-from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.comment import Comment
-from app.models.kb import KBChunk, KBDocument
 from app.models.order import Order, OrderStatusLog
 from app.models.refund import RefundTicket
-from app.models.support import SupportMessage, SupportRetrievalLog, SupportSession
+from app.models.support import SupportMessage, SupportSession
 from app.models.user import User
 from app.schemas.support import SupportMessageCreate, SupportSessionCreate
 
@@ -130,6 +128,26 @@ async def create_support_session(db: AsyncSession, operator_id: int, payload: Su
     return session
 
 
+async def create_support_session_for_user(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    question: str,
+    queried_entities: list[dict],
+) -> SupportSession:
+    session = SupportSession(
+        operator_id=user_id,
+        user_id=user_id,
+        question=question,
+        answer="",
+        queried_entities=json.dumps(queried_entities, ensure_ascii=False),
+    )
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    return session
+
+
 async def _get_session_or_raise(db: AsyncSession, session_id: int) -> SupportSession:
     result = await db.execute(select(SupportSession).where(SupportSession.id == session_id))
     session = result.scalar_one_or_none()
@@ -138,34 +156,19 @@ async def _get_session_or_raise(db: AsyncSession, session_id: int) -> SupportSes
     return session
 
 
-def _parse_payload(value: str) -> dict:
-    if not value:
-        return {}
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+async def get_support_session(db: AsyncSession, session_id: int) -> SupportSession | None:
+    result = await db.execute(select(SupportSession).where(SupportSession.id == session_id))
+    return result.scalar_one_or_none()
 
 
-def _to_float(value: Decimal | float | None) -> float | None:
-    if value is None:
-        return None
-    return float(value)
-
-
-def _to_evidence_out(log: SupportRetrievalLog) -> dict:
-    return {
-        "id": log.id,
-        "session_id": log.session_id,
-        "message_id": log.message_id,
-        "document_id": log.document_id,
-        "chunk_id": log.chunk_id,
-        "score": _to_float(log.score),
-        "is_cited": log.is_cited,
-        "payload": _parse_payload(log.payload_json),
-        "created_at": log.created_at,
-    }
+async def get_latest_support_session_for_user(db: AsyncSession, user_id: int) -> SupportSession | None:
+    result = await db.execute(
+        select(SupportSession)
+        .where(SupportSession.user_id == user_id)
+        .order_by(SupportSession.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def create_support_message(db: AsyncSession, session_id: int, payload: SupportMessageCreate) -> dict:
@@ -178,49 +181,9 @@ async def create_support_message(db: AsyncSession, session_id: int, payload: Sup
         retrieval_query=payload.retrieval_query,
     )
     db.add(message)
-    await db.flush()
-
-    logs: list[SupportRetrievalLog] = []
-    for evidence in payload.evidences:
-        if evidence.document_id is not None:
-            doc = (
-                await db.execute(select(KBDocument.id).where(KBDocument.id == evidence.document_id))
-            ).scalar_one_or_none()
-            if doc is None:
-                raise ValueError("知识库文档不存在")
-
-        chunk_doc_id = None
-        if evidence.chunk_id is not None:
-            chunk_doc_id = (
-                await db.execute(select(KBChunk.document_id).where(KBChunk.id == evidence.chunk_id))
-            ).scalar_one_or_none()
-            if chunk_doc_id is None:
-                raise ValueError("知识库切片不存在")
-
-        if evidence.document_id is not None and chunk_doc_id is not None and evidence.document_id != chunk_doc_id:
-            raise ValueError("证据文档与切片不匹配")
-
-        log = SupportRetrievalLog(
-            session_id=session_id,
-            message_id=message.id,
-            document_id=evidence.document_id or chunk_doc_id,
-            chunk_id=evidence.chunk_id,
-            score=evidence.score,
-            is_cited=evidence.is_cited,
-            payload_json=json.dumps(evidence.payload, ensure_ascii=False),
-        )
-        db.add(log)
-        logs.append(log)
-
     await db.commit()
     await db.refresh(message)
-    for log in logs:
-        await db.refresh(log)
-
-    return {
-        "message": message,
-        "evidences": [_to_evidence_out(log) for log in logs],
-    }
+    return {"message": message}
 
 
 async def list_support_messages(db: AsyncSession, session_id: int) -> list[SupportMessage]:
@@ -229,14 +192,3 @@ async def list_support_messages(db: AsyncSession, session_id: int) -> list[Suppo
         select(SupportMessage).where(SupportMessage.session_id == session_id).order_by(SupportMessage.id.asc())
     )
     return list(result.scalars().all())
-
-
-async def list_support_evidence(db: AsyncSession, session_id: int) -> list[dict]:
-    await _get_session_or_raise(db, session_id)
-    result = await db.execute(
-        select(SupportRetrievalLog)
-        .where(SupportRetrievalLog.session_id == session_id)
-        .order_by(SupportRetrievalLog.id.asc())
-    )
-    logs = result.scalars().all()
-    return [_to_evidence_out(log) for log in logs]

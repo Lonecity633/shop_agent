@@ -49,8 +49,8 @@ async def create_order(db: AsyncSession, current_user: User, payload: OrderCreat
         raise ServiceError("ORDER_CREATE_FAILED", str(exc), 400) from exc
 
 
-async def pay_order(db: AsyncSession, current_user: User, order_id: int, payload: OrderPayPayload):
-    order = await order_crud.get_order_for_update(db, order_id)
+async def pay_order(db: AsyncSession, current_user: User, order_no: str, payload: OrderPayPayload):
+    order = await order_crud.get_order_for_update_by_no(db, order_no)
     ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
     ensure(current_user.role == UserRole.buyer and order.user_id == current_user.id, "ORDER_FORBIDDEN", "仅订单买家可支付", 403)
 
@@ -60,8 +60,8 @@ async def pay_order(db: AsyncSession, current_user: User, order_id: int, payload
         raise ServiceError("ORDER_NOT_PAYABLE", str(exc), 400) from exc
 
 
-async def close_order(db: AsyncSession, current_user: User, order_id: int, payload: OrderClosePayload):
-    order = await order_crud.get_order_for_update(db, order_id)
+async def close_order(db: AsyncSession, current_user: User, order_no: str, payload: OrderClosePayload):
+    order = await order_crud.get_order_for_update_by_no(db, order_no)
     ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
     await _ensure_order_access(db, current_user, order)
 
@@ -77,20 +77,20 @@ async def list_orders(db: AsyncSession, current_user: User):
     return await order_crud.list_orders_by_role(db, current_user)
 
 
-async def get_order(db: AsyncSession, current_user: User, order_id: int):
-    order = await order_crud.get_order(db, order_id)
+async def get_order(db: AsyncSession, current_user: User, order_no: str):
+    order = await order_crud.get_order_by_no(db, order_no)
     ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
     await _ensure_order_access(db, current_user, order)
     return order
 
 
-async def get_order_status(db: AsyncSession, current_user: User, order_id: int):
-    order = await get_order(db, current_user, order_id)
-    return {"order_id": order.id, "status": order.status.value}
+async def get_order_status(db: AsyncSession, current_user: User, order_no: str):
+    order = await get_order(db, current_user, order_no)
+    return {"order_no": order.order_no, "status": order.status.value}
 
 
-async def patch_order_status(db: AsyncSession, current_user: User, order_id: int, payload: OrderStatusUpdate):
-    order = await order_crud.get_order_for_update(db, order_id)
+async def patch_order_status(db: AsyncSession, current_user: User, order_no: str, payload: OrderStatusUpdate):
+    order = await order_crud.get_order_for_update_by_no(db, order_no)
     ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
     ensure(current_user.role == UserRole.buyer and order.user_id == current_user.id, "ORDER_FORBIDDEN", "仅订单买家可取消订单", 403)
     ensure(order.status == OrderStatus.pending_paid, "ORDER_NOT_CANCELLABLE", "仅待支付订单可取消，已支付订单请走退款流程", 400)
@@ -106,11 +106,11 @@ async def patch_order_status(db: AsyncSession, current_user: User, order_id: int
     except ValueError as exc:
         raise ServiceError("ORDER_NOT_CANCELLABLE", str(exc), 400) from exc
 
-    return {"order_id": order.id, "status": order.status.value}
+    return {"order_no": order.order_no, "status": order.status.value}
 
 
-async def ship_order(db: AsyncSession, current_user: User, order_id: int, payload: ShipOrderPayload):
-    order = await order_crud.get_order_for_update(db, order_id)
+async def ship_order(db: AsyncSession, current_user: User, order_no: str, payload: ShipOrderPayload):
+    order = await order_crud.get_order_for_update_by_no(db, order_no)
     ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
     ensure(current_user.role == UserRole.seller, "ROLE_DENIED", "仅卖家可发货", 403)
 
@@ -123,8 +123,8 @@ async def ship_order(db: AsyncSession, current_user: User, order_id: int, payloa
         raise ServiceError("ORDER_NOT_SHIPPABLE", str(exc), 400) from exc
 
 
-async def receive_order(db: AsyncSession, current_user: User, order_id: int, payload: ReceiveOrderPayload):
-    order = await order_crud.get_order_for_update(db, order_id)
+async def receive_order(db: AsyncSession, current_user: User, order_no: str, payload: ReceiveOrderPayload):
+    order = await order_crud.get_order_for_update_by_no(db, order_no)
     ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
     ensure(current_user.role == UserRole.buyer and order.user_id == current_user.id, "ORDER_FORBIDDEN", "仅订单买家可确认收货", 403)
 
@@ -134,15 +134,15 @@ async def receive_order(db: AsyncSession, current_user: User, order_id: int, pay
         raise ServiceError("ORDER_NOT_RECEIVABLE", str(exc), 400) from exc
 
 
-async def get_order_logs(db: AsyncSession, current_user: User, order_id: int):
-    order = await order_crud.get_order(db, order_id)
+async def get_order_logs(db: AsyncSession, current_user: User, order_no: str):
+    order = await order_crud.get_order_by_no(db, order_no)
     ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
     await _ensure_order_access(db, current_user, order)
-    return await order_crud.list_order_logs(db, order_id)
+    return await order_crud.list_order_logs(db, order.id)
 
 
-async def create_order_comment(db: AsyncSession, current_user: User, order_id: int, payload: OrderCommentCreate):
-    order = await order_crud.get_order(db, order_id)
+async def create_order_comment(db: AsyncSession, current_user: User, order_no: str, payload: OrderCommentCreate):
+    order = await order_crud.get_order_by_no(db, order_no)
     ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
     ensure(current_user.role == UserRole.buyer and order.user_id == current_user.id, "ORDER_FORBIDDEN", "仅订单买家可评论", 403)
 
@@ -152,8 +152,8 @@ async def create_order_comment(db: AsyncSession, current_user: User, order_id: i
         raise ServiceError("ORDER_COMMENT_REJECTED", str(exc), 400) from exc
 
 
-async def delete_order(db: AsyncSession, current_user: User, order_id: int):
-    order = await order_crud.get_order(db, order_id)
+async def delete_order(db: AsyncSession, current_user: User, order_no: str):
+    order = await order_crud.get_order_by_no(db, order_no)
     ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
     await _ensure_order_access(db, current_user, order)
     raise ServiceError("ORDER_DELETE_FORBIDDEN", "订单不允许物理删除", 403)

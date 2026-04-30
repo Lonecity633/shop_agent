@@ -40,6 +40,14 @@ const activeRefundOrderIds = computed(() => {
   )
 })
 
+const orderNoById = computed(() => {
+  const map = new Map()
+  for (const order of orders.value || []) {
+    map.set(Number(order.id), displayOrderNo(order))
+  }
+  return map
+})
+
 const eligibleOrders = computed(() => {
   if (!isBuyer.value) return []
   return (orders.value || []).filter((order) => {
@@ -81,6 +89,37 @@ function formatTime(value) {
 function formatPrice(value) {
   const num = Number(value || 0)
   return Number.isFinite(num) ? num.toFixed(2) : '0.00'
+}
+
+function displayOrderNo(order) {
+  return order?.order_no || '-'
+}
+
+function statusLabel(status) {
+  const map = {
+    pending_paid: '待支付',
+    paid: '已支付待发货',
+    shipped: '已发货',
+    received: '已收货',
+    completed: '已完成',
+    cancelled: '已取消',
+    closed: '已关闭',
+  }
+  return map[status] || status
+}
+
+function payStatusLabel(status) {
+  const map = {
+    pending: '待支付',
+    paid: '已支付',
+    refunded: '已退款',
+    closed: '已关闭',
+  }
+  return map[status] || status
+}
+
+function displayRefundOrderNo(refund) {
+  return orderNoById.value.get(Number(refund?.order_id)) || '-'
 }
 
 async function fetchRefunds() {
@@ -190,10 +229,16 @@ onMounted(refreshData)
       </div>
       <el-empty v-if="!eligibleOrders.length" description="暂无可申请退款订单" />
       <el-table v-else :data="eligibleOrders" border stripe>
-        <el-table-column prop="id" label="订单ID" width="100" />
+        <el-table-column label="订单号" min-width="220">
+          <template #default="scope">{{ displayOrderNo(scope.row) }}</template>
+        </el-table-column>
         <el-table-column prop="product_id" label="商品ID" width="100" />
-        <el-table-column prop="status" label="订单状态" width="130" />
-        <el-table-column prop="pay_status" label="支付状态" width="120" />
+        <el-table-column label="订单状态" width="130">
+          <template #default="scope">{{ statusLabel(scope.row.status) }}</template>
+        </el-table-column>
+        <el-table-column label="支付状态" width="120">
+          <template #default="scope">{{ payStatusLabel(scope.row.pay_status) }}</template>
+        </el-table-column>
         <el-table-column label="支付金额" width="120">
           <template #default="scope">¥{{ formatPrice(scope.row.pay_amount) }}</template>
         </el-table-column>
@@ -212,7 +257,9 @@ onMounted(refreshData)
       <el-empty v-if="!refunds.length" description="暂无退款记录" />
       <el-table v-else :data="refunds" border stripe>
         <el-table-column prop="id" label="退款ID" width="92" />
-        <el-table-column prop="order_id" label="订单ID" width="92" />
+        <el-table-column label="订单号" min-width="220">
+          <template #default="scope">{{ displayRefundOrderNo(scope.row) }}</template>
+        </el-table-column>
         <el-table-column label="状态" width="140">
           <template #default="scope">
             <el-tag :type="refundStatusType(scope.row.status)">{{ refundStatusLabel(scope.row.status) }}</el-tag>
@@ -260,7 +307,7 @@ onMounted(refreshData)
             <el-option
               v-for="order in eligibleOrders"
               :key="order.id"
-              :label="`订单 #${order.id}（¥${formatPrice(order.pay_amount)}）`"
+              :label="`${displayOrderNo(order)}（¥${formatPrice(order.pay_amount)}）`"
               :value="order.id"
             />
           </el-select>

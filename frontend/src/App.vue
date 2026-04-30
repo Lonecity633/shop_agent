@@ -1,6 +1,5 @@
 <script setup>
 import { computed } from 'vue'
-import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
@@ -81,7 +80,8 @@ async function handleLogout() {
 }
 
 function contactService() {
-  ElMessage.info('客服在线时间：09:00-21:00，请通过订单页工单入口联系')
+  if (!ensureLogin('/support/chat')) return
+  router.push('/support/chat')
 }
 </script>
 

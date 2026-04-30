@@ -108,21 +108,22 @@ ON DUPLICATE KEY UPDATE
 
 -- orders
 INSERT INTO orders (
-  id, user_id, product_id, status, pay_status, total_price, pay_amount, pay_channel,
+  id, order_no, user_id, product_id, status, pay_status, total_price, pay_amount, pay_channel,
   paid_at, close_reason, inventory_reverted, address_snapshot,
   tracking_no, logistics_company, shipped_at, received_at
 )
 VALUES
-  (5001, 1004, 3001, 'pending_paid', 'pending', 199.00, 199.00, 'simulated', NULL, '', 0,
+  (5001, 'SO20260430000000005001', 1004, 3001, 'pending_paid', 'pending', 199.00, 199.00, 'simulated', NULL, '', 0,
    '{"address_id":4001,"receiver_name":"张三","receiver_phone":"13900000001","province":"上海市","city":"上海市","district":"浦东新区","detail_address":"世纪大道 100 号"}',
    '', '', NULL, NULL),
-  (5002, 1004, 3002, 'completed', 'paid', 1198.00, 1198.00, 'simulated', DATE_SUB(NOW(), INTERVAL 3 DAY), '', 0,
+  (5002, 'SO20260430000000005002', 1004, 3002, 'completed', 'paid', 1198.00, 1198.00, 'simulated', DATE_SUB(NOW(), INTERVAL 3 DAY), '', 0,
    '{"address_id":4001,"receiver_name":"张三","receiver_phone":"13900000001","province":"上海市","city":"上海市","district":"浦东新区","detail_address":"世纪大道 100 号"}',
    'SF123456789CN', '顺丰速运', DATE_SUB(NOW(), INTERVAL 2 DAY), DATE_SUB(NOW(), INTERVAL 1 DAY)),
-  (5003, 1005, 3001, 'cancelled', 'refunded', 199.00, 199.00, 'simulated', DATE_SUB(NOW(), INTERVAL 4 DAY), '退款完成', 1,
+  (5003, 'SO20260430000000005003', 1005, 3001, 'cancelled', 'refunded', 199.00, 199.00, 'simulated', DATE_SUB(NOW(), INTERVAL 4 DAY), '退款完成', 1,
    '{"address_id":4003,"receiver_name":"李四","receiver_phone":"13900000003","province":"北京市","city":"北京市","district":"海淀区","detail_address":"中关村大街 1 号"}',
    '', '', NULL, NULL)
 ON DUPLICATE KEY UPDATE
+  order_no = VALUES(order_no),
   user_id = VALUES(user_id),
   product_id = VALUES(product_id),
   status = VALUES(status),

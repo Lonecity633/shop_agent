@@ -28,6 +28,11 @@ class SupportSessionCreate(BaseModel):
     queried_entities: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class SupportMySessionCreate(BaseModel):
+    question: str = Field(default="", max_length=4000)
+    queried_entities: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class SupportSessionOut(BaseModel):
     id: int
     operator_id: int
@@ -53,19 +58,10 @@ class SupportSessionOut(BaseModel):
         return []
 
 
-class SupportRetrievalEvidenceCreate(BaseModel):
-    document_id: int | None = Field(default=None, gt=0)
-    chunk_id: int | None = Field(default=None, gt=0)
-    score: float | None = Field(default=None, ge=0)
-    is_cited: bool = False
-    payload: dict[str, Any] = Field(default_factory=dict)
-
-
 class SupportMessageCreate(BaseModel):
     role: Literal["user", "assistant", "system", "tool"] = "user"
     content: str = Field(..., min_length=1, max_length=8000)
     retrieval_query: str = Field(default="", max_length=4000)
-    evidences: list[SupportRetrievalEvidenceCreate] = Field(default_factory=list)
 
 
 class SupportMessageOut(BaseModel):
@@ -79,18 +75,17 @@ class SupportMessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class SupportRetrievalLogOut(BaseModel):
-    id: int
-    session_id: int
-    message_id: int | None
-    document_id: int | None
-    chunk_id: int | None
-    score: float | None
-    is_cited: bool
-    payload: dict[str, Any]
-    created_at: datetime
-
-
 class SupportMessageRecordOut(BaseModel):
     message: SupportMessageOut
-    evidences: list[SupportRetrievalLogOut]
+
+
+class SupportAutoReplyRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=8000)
+    order_id: int | None = Field(default=None, gt=0)
+    product_id: int | None = Field(default=None, gt=0)
+
+
+class SupportAutoReplyOut(BaseModel):
+    answer: str
+    route: str
+    resolved_seller_id: int | None

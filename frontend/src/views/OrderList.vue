@@ -17,7 +17,7 @@ const loadingLogId = ref(null)
 const shipDialogVisible = ref(false)
 const shipSubmitting = ref(false)
 const shipForm = reactive({
-  orderId: null,
+  orderNo: '',
   tracking_no: '',
   logistics_company: '',
 })
@@ -25,11 +25,12 @@ const shipForm = reactive({
 const logDialogVisible = ref(false)
 const currentLogOrderId = ref(null)
 const orderLogs = ref([])
+const currentLogOrderNo = ref('')
 
 const commentDialogVisible = ref(false)
 const commentSubmitting = ref(false)
 const commentForm = reactive({
-  orderId: null,
+  orderNo: '',
   rating: 5,
   content: '',
 })
@@ -65,11 +66,52 @@ function statusLabel(status) {
   return map[status] || status
 }
 
+function payStatusType(status) {
+  if (status === 'paid') return 'success'
+  if (status === 'pending') return 'warning'
+  if (status === 'refunded') return 'info'
+  if (status === 'closed') return 'danger'
+  return 'info'
+}
+
+function payStatusLabel(status) {
+  const map = {
+    pending: '待支付',
+    paid: '已支付',
+    refunded: '已退款',
+    closed: '已关闭',
+  }
+  return map[status] || status
+}
+
 function formatTime(value) {
   if (!value) return '-'
   const dt = new Date(value)
   if (Number.isNaN(dt.getTime())) return value
   return dt.toLocaleString()
+}
+
+function formatAddress(snapshot) {
+  if (!snapshot) return '-'
+  if (typeof snapshot !== 'string') return '-'
+  try {
+    const parsed = JSON.parse(snapshot)
+    if (!parsed || typeof parsed !== 'object') return '-'
+    const receiver = parsed.receiver_name || ''
+    const phone = parsed.receiver_phone || ''
+    const region = [parsed.province, parsed.city, parsed.district].filter(Boolean).join('')
+    const detail = parsed.detail_address || ''
+    const addressLine = `${region}${detail}`.trim()
+    const head = [receiver, phone].filter(Boolean).join(' ')
+    if (head && addressLine) return `${head}，${addressLine}`
+    return head || addressLine || '-'
+  } catch {
+    return '-'
+  }
+}
+
+function displayOrderNo(order) {
+  return order.order_no || '-'
 }
 
 function formatReason(log) {
@@ -113,11 +155,11 @@ async function fetchOrders() {
 }
 
 async function handleGetLatestStatus(order) {
-  checkingStatusId.value = order.id
+  checkingStatusId.value = order.order_no
   try {
-    const res = await getOrderStatus(order.id)
+    const res = await getOrderStatus(order.order_no)
     order.status = res.data?.status || order.status
-    ElMessage.success(`订单 ${order.id} 最新状态：${statusLabel(order.status)}`)
+    ElMessage.success(`订单 ${displayOrderNo(order)} 最新状态：${statusLabel(order.status)}`)
   } catch (error) {
     ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '查询订单状态失败')
   } finally {
@@ -126,11 +168,12 @@ async function handleGetLatestStatus(order) {
 }
 
 async function handleViewLogs(order) {
-  loadingLogId.value = order.id
+  loadingLogId.value = order.order_no
   try {
-    const res = await getOrderLogs(order.id)
+    const res = await getOrderLogs(order.order_no)
     orderLogs.value = res.data || []
     currentLogOrderId.value = order.id
+    currentLogOrderNo.value = displayOrderNo(order)
     logDialogVisible.value = true
   } catch (error) {
     ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '获取状态轨迹失败')
@@ -140,9 +183,9 @@ async function handleViewLogs(order) {
 }
 
 async function handleCancelOrder(order) {
-  updatingStatusId.value = order.id
+  updatingStatusId.value = order.order_no
   try {
-    const res = await updateOrderStatus(order.id, 'cancelled')
+    const res = await updateOrderStatus(order.order_no, 'cancelled')
     order.status = res.data?.status || 'cancelled'
     ElMessage.success(res.message || '订单已取消')
   } catch (error) {
@@ -153,9 +196,9 @@ async function handleCancelOrder(order) {
 }
 
 async function handlePayOrder(order) {
-  updatingStatusId.value = order.id
+  updatingStatusId.value = order.order_no
   try {
-    const res = await payOrder(order.id, 'simulated')
+    const res = await payOrder(order.order_no, 'simulated')
     order.status = res.data?.status || order.status
     order.pay_status = res.data?.pay_status || order.pay_status
     ElMessage.success(res.message || '支付成功')
@@ -167,9 +210,9 @@ async function handlePayOrder(order) {
 }
 
 async function handleReceiveOrder(order) {
-  updatingStatusId.value = order.id
+  updatingStatusId.value = order.order_no
   try {
-    const res = await receiveOrder(order.id)
+    const res = await receiveOrder(order.order_no)
     order.status = res.data?.status || order.status
     order.received_at = res.data?.received_at || order.received_at
     ElMessage.success(res.message || '确认收货成功')
@@ -181,14 +224,14 @@ async function handleReceiveOrder(order) {
 }
 
 function openShipDialog(order) {
-  shipForm.orderId = order.id
+  shipForm.orderNo = order.order_no || ''
   shipForm.tracking_no = ''
   shipForm.logistics_company = ''
   shipDialogVisible.value = true
 }
 
 async function submitShip() {
-  if (!shipForm.orderId) return
+  if (!shipForm.orderNo) return
   if (!shipForm.tracking_no.trim()) {
     ElMessage.warning('请填写物流单号')
     return
@@ -200,7 +243,7 @@ async function submitShip() {
 
   shipSubmitting.value = true
   try {
-    const res = await shipOrder(shipForm.orderId, {
+    const res = await shipOrder(shipForm.orderNo, {
       tracking_no: shipForm.tracking_no.trim(),
       logistics_company: shipForm.logistics_company.trim(),
     })
@@ -215,18 +258,18 @@ async function submitShip() {
 }
 
 function openCommentDialog(order) {
-  commentForm.orderId = order.id
+  commentForm.orderNo = order.order_no || ''
   commentForm.rating = 5
   commentForm.content = ''
   commentDialogVisible.value = true
 }
 
 async function submitComment() {
-  if (!commentForm.orderId) return
+  if (!commentForm.orderNo) return
 
   commentSubmitting.value = true
   try {
-    const res = await createOrderComment(commentForm.orderId, {
+    const res = await createOrderComment(commentForm.orderNo, {
       rating: Number(commentForm.rating),
       content: commentForm.content.trim(),
     })
@@ -284,7 +327,9 @@ onMounted(fetchOrders)
 
     <section class="page-block table-wrap">
       <el-table v-loading="loading" :data="orders" stripe>
-        <el-table-column prop="id" label="订单ID" width="92" />
+        <el-table-column label="订单号" min-width="220">
+          <template #default="scope">{{ displayOrderNo(scope.row) }}</template>
+        </el-table-column>
         <el-table-column prop="product_id" label="商品ID" width="92" />
         <el-table-column prop="total_price" label="总价" width="110">
           <template #default="scope">¥{{ Number(scope.row.total_price).toFixed(2) }}</template>
@@ -296,12 +341,21 @@ onMounted(fetchOrders)
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="pay_status" label="支付状态" width="120" />
+        <el-table-column label="支付状态" width="120">
+          <template #default="scope">
+            <el-tag :type="payStatusType(scope.row.pay_status)">
+              {{ payStatusLabel(scope.row.pay_status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="logistics_company" label="物流公司" min-width="140">
           <template #default="scope">{{ scope.row.logistics_company || '-' }}</template>
         </el-table-column>
         <el-table-column prop="tracking_no" label="物流单号" min-width="160">
           <template #default="scope">{{ scope.row.tracking_no || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="收货地址" min-width="280" show-overflow-tooltip>
+          <template #default="scope">{{ formatAddress(scope.row.address_snapshot) }}</template>
         </el-table-column>
         <el-table-column label="发货时间" min-width="170">
           <template #default="scope">{{ formatTime(scope.row.shipped_at) }}</template>
@@ -309,17 +363,17 @@ onMounted(fetchOrders)
         <el-table-column label="操作" width="520" fixed="right">
           <template #default="scope">
             <div class="actions">
-              <el-button :loading="checkingStatusId === scope.row.id" @click="handleGetLatestStatus(scope.row)">
+              <el-button :loading="checkingStatusId === scope.row.order_no" @click="handleGetLatestStatus(scope.row)">
                 刷新状态
               </el-button>
-              <el-button :loading="loadingLogId === scope.row.id" @click="handleViewLogs(scope.row)">
+              <el-button :loading="loadingLogId === scope.row.order_no" @click="handleViewLogs(scope.row)">
                 状态轨迹
               </el-button>
 
               <el-button
                 v-if="canPay(scope.row)"
                 type="warning"
-                :loading="updatingStatusId === scope.row.id"
+                :loading="updatingStatusId === scope.row.order_no"
                 @click="handlePayOrder(scope.row)"
               >
                 模拟支付
@@ -328,7 +382,7 @@ onMounted(fetchOrders)
               <el-button
                 v-if="canShip(scope.row)"
                 type="primary"
-                :loading="updatingStatusId === scope.row.id"
+                :loading="updatingStatusId === scope.row.order_no"
                 @click="openShipDialog(scope.row)"
               >
                 发货
@@ -337,7 +391,7 @@ onMounted(fetchOrders)
               <el-button
                 v-if="canReceive(scope.row)"
                 type="success"
-                :loading="updatingStatusId === scope.row.id"
+                :loading="updatingStatusId === scope.row.order_no"
                 @click="handleReceiveOrder(scope.row)"
               >
                 确认收货
@@ -346,7 +400,7 @@ onMounted(fetchOrders)
               <el-button
                 v-if="canCancel(scope.row)"
                 type="danger"
-                :loading="updatingStatusId === scope.row.id"
+                :loading="updatingStatusId === scope.row.order_no"
                 @click="handleCancelOrder(scope.row)"
               >
                 取消订单
@@ -390,7 +444,7 @@ onMounted(fetchOrders)
       </template>
     </el-dialog>
 
-    <el-dialog v-model="logDialogVisible" :title="`订单 ${currentLogOrderId || ''} 状态轨迹`" width="640px">
+    <el-dialog v-model="logDialogVisible" :title="`订单 ${currentLogOrderNo || currentLogOrderId || ''} 状态轨迹`" width="640px">
       <el-empty v-if="!orderLogs.length" description="该订单暂无状态变更记录" />
       <el-timeline v-else>
         <el-timeline-item

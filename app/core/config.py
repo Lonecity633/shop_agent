@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     order_rate_limit_window_seconds: int = 60
     auth_fail_closed: bool = True
     jwt_require_strong_secret: bool = True
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_api_key: str = ""
+    llm_model: str = "gpt-4o-mini"
+    llm_timeout_seconds: int = 30
+    llm_temperature: float = 0.2
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

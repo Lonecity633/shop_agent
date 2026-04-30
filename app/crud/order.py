@@ -1,4 +1,5 @@
 import json
+from secrets import randbelow
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -14,6 +15,11 @@ from app.models.order import Order, OrderItem, OrderStatus, OrderStatusLog, PayS
 from app.models.product import Product, ProductStatus
 from app.models.user import User, UserRole
 from app.schemas.order import OrderCommentCreate, OrderCreate, ShipOrderPayload
+
+
+def _generate_order_no() -> str:
+    # Format: SO + UTC timestamp (microseconds) + random suffix.
+    return f"SO{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}{randbelow(10000):04d}"
 
 
 def _can_transition(from_status: OrderStatus, to_status: OrderStatus) -> bool:
@@ -95,6 +101,7 @@ async def create_order(db: AsyncSession, payload: OrderCreate, buyer_id: int) ->
     product.stock -= quantity
 
     order = Order(
+        order_no=_generate_order_no(),
         user_id=buyer_id,
         product_id=payload.product_id,
         status=OrderStatus.pending_paid,
@@ -243,9 +250,23 @@ async def get_order(db: AsyncSession, order_id: int) -> Order | None:
     return result.scalar_one_or_none()
 
 
+async def get_order_by_no(db: AsyncSession, order_no: str) -> Order | None:
+    result = await db.execute(
+        select(Order).options(selectinload(Order.items)).where(Order.order_no == order_no)
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_order_for_update(db: AsyncSession, order_id: int) -> Order | None:
     result = await db.execute(
         select(Order).options(selectinload(Order.items)).where(Order.id == order_id).with_for_update()
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_order_for_update_by_no(db: AsyncSession, order_no: str) -> Order | None:
+    result = await db.execute(
+        select(Order).options(selectinload(Order.items)).where(Order.order_no == order_no).with_for_update()
     )
     return result.scalar_one_or_none()
 

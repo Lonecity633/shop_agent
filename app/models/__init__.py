@@ -3,13 +3,12 @@ from app.models.category import Category
 from app.models.address import UserAddress
 from app.models.comment import Comment
 from app.models.favorite import Favorite
-from app.models.kb import KBChunk, KBDocument
 from app.models.operation_audit import OperationAudit
 from app.models.order import Order, OrderItem
 from app.models.product import Product
 from app.models.refund import RefundTicket
 from app.models.seller_profile import SellerProfile
-from app.models.support import SupportMessage, SupportRetrievalLog, SupportSession
+from app.models.support import SupportMessage, SupportSession
 from app.models.user import User
 
 __all__ = [
@@ -27,7 +26,4 @@ __all__ = [
     "RefundTicket",
     "SupportSession",
     "SupportMessage",
-    "SupportRetrievalLog",
-    "KBDocument",
-    "KBChunk",
 ]

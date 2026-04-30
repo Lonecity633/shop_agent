@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routers.auth import get_current_user
@@ -6,13 +6,14 @@ from app.core.errors import raise_error
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.common import APIResponse
-from app.schemas.kb import KBDocumentCreate, KBDocumentOut
 from app.schemas.support import (
+    SupportAutoReplyOut,
+    SupportAutoReplyRequest,
     SupportMessageCreate,
     SupportMessageOut,
     SupportMessageRecordOut,
+    SupportMySessionCreate,
     SupportOverviewOut,
-    SupportRetrievalLogOut,
     SupportSessionCreate,
     SupportSessionOut,
     SupportTimelineOut,
@@ -66,6 +67,31 @@ async def create_support_session(
     return {"code": "OK", "message": "客服会话记录成功", "data": data}
 
 
+@router.post("/me/sessions", response_model=APIResponse[SupportSessionOut])
+async def create_my_support_session(
+    payload: SupportMySessionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await support_service.create_my_support_session(db, current_user, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "客服会话创建成功", "data": data}
+
+
+@router.get("/me/sessions/latest", response_model=APIResponse[SupportSessionOut])
+async def get_my_latest_support_session(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await support_service.get_my_latest_support_session(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "最近客服会话获取成功", "data": data}
+
+
 @router.post("/sessions/{session_id}/messages", response_model=APIResponse[SupportMessageRecordOut])
 async def create_support_message(
     session_id: int,
@@ -93,48 +119,15 @@ async def get_support_messages(
     return {"code": "OK", "message": "会话消息获取成功", "data": data}
 
 
-@router.get("/sessions/{session_id}/evidence", response_model=APIResponse[list[SupportRetrievalLogOut]])
-async def get_support_evidence(
+@router.post("/sessions/{session_id}/reply", response_model=APIResponse[SupportAutoReplyOut])
+async def auto_reply(
     session_id: int,
+    payload: SupportAutoReplyRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     try:
-        data = await support_service.get_support_evidence(db, current_user, session_id)
+        data = await support_service.auto_reply(db, current_user, session_id, payload)
     except ServiceError as exc:
         _handle_error(exc)
-    return {"code": "OK", "message": "检索证据获取成功", "data": data}
-
-
-@router.post("/kb/documents", response_model=APIResponse[KBDocumentOut])
-async def create_kb_document(
-    payload: KBDocumentCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    try:
-        data = await support_service.create_kb_document(db, current_user, payload)
-    except ServiceError as exc:
-        _handle_error(exc)
-    return {"code": "OK", "message": "知识库文档创建成功", "data": data}
-
-
-@router.get("/kb/documents", response_model=APIResponse[list[KBDocumentOut]])
-async def get_kb_documents(
-    status: str | None = Query(default=None, description="文档状态过滤"),
-    keyword: str | None = Query(default=None, description="标题关键词"),
-    limit: int = Query(default=50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    try:
-        data = await support_service.get_kb_documents(
-            db,
-            current_user,
-            status=status,
-            keyword=keyword,
-            limit=limit,
-        )
-    except ServiceError as exc:
-        _handle_error(exc)
-    return {"code": "OK", "message": "知识库文档列表获取成功", "data": data}
+    return {"code": "OK", "message": "智能客服回复成功", "data": data}

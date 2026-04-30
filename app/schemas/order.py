@@ -51,6 +51,7 @@ class OrderItemOut(BaseModel):
 
 class OrderOut(BaseModel):
     id: int
+    order_no: str
     user_id: int
     product_id: int
     status: str
@@ -74,7 +75,7 @@ class OrderOut(BaseModel):
 
 
 class OrderStatusOut(BaseModel):
-    order_id: int
+    order_no: str
     status: str
 
 
