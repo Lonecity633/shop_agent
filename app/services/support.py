@@ -4,6 +4,7 @@ from app.agent import SupportAgentOrchestrator
 from app.crud import support as support_crud
 from app.models.user import User, UserRole
 from app.schemas.support import SupportAutoReplyRequest, SupportMessageCreate, SupportMySessionCreate, SupportSessionCreate
+from app.services.rate_limit import RateLimitBackendUnavailable, rate_limit_service
 from app.services.common import ServiceError, ensure
 
 agent_orchestrator = SupportAgentOrchestrator()
@@ -67,6 +68,14 @@ async def auto_reply(
     payload: SupportAutoReplyRequest,
 ):
     try:
+        rate_limit = await rate_limit_service.check_support_reply(current_user.id)
+        if not rate_limit.allowed:
+            raise ServiceError(
+                "SUPPORT_REPLY_RATE_LIMITED",
+                "您发送消息太频繁，请稍后再试",
+                429,
+            )
+
         result = await agent_orchestrator.reply(
             db,
             current_user=current_user,
@@ -80,6 +89,8 @@ async def auto_reply(
             "route": result.route,
             "resolved_seller_id": result.resolved_seller_id,
         }
+    except RateLimitBackendUnavailable as exc:
+        raise ServiceError("SUPPORT_RATE_LIMIT_UNAVAILABLE", "客服限流服务暂不可用，请稍后再试", 503) from exc
     except ValueError as exc:
         raise ServiceError("SUPPORT_SESSION_NOT_FOUND", str(exc), 404) from exc
     except PermissionError as exc:

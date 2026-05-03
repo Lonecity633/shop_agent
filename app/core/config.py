@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     login_rate_limit_window_seconds: int = 60
     order_rate_limit_count: int = 20
     order_rate_limit_window_seconds: int = 60
+    support_reply_short_rate_limit_count: int = 5
+    support_reply_short_rate_limit_window_seconds: int = 10
+    support_reply_long_rate_limit_count: int = 20
+    support_reply_long_rate_limit_window_seconds: int = 60
+    support_reply_rate_limit_fail_closed: bool = False
     auth_fail_closed: bool = True
     jwt_require_strong_secret: bool = True
     llm_base_url: str = "https://api.openai.com/v1"
