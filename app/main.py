@@ -56,6 +56,12 @@ async def http_exception_handler(_: Request, exc: HTTPException):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://localhost:80",
+        "http://127.0.0.1:80",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],

@@ -188,7 +188,13 @@ async def create_support_message(db: AsyncSession, session_id: int, payload: Sup
 
 async def list_support_messages(db: AsyncSession, session_id: int) -> list[SupportMessage]:
     await _get_session_or_raise(db, session_id)
+    visible_roles = ("system", "user", "assistant")
     result = await db.execute(
-        select(SupportMessage).where(SupportMessage.session_id == session_id).order_by(SupportMessage.id.asc())
+        select(SupportMessage)
+        .where(
+            SupportMessage.session_id == session_id,
+            SupportMessage.role.in_(visible_roles),
+        )
+        .order_by(SupportMessage.id.asc())
     )
     return list(result.scalars().all())

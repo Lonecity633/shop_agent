@@ -28,12 +28,15 @@ function formatTime(value) {
 }
 
 function normalizeMessages(rows) {
-  return (rows || []).map((item) => ({
-    id: item.id,
-    role: item.role,
-    content: item.content,
-    created_at: item.created_at,
-  }))
+  const visibleRoles = new Set(['system', 'user', 'assistant'])
+  return (rows || [])
+    .filter((item) => visibleRoles.has(item.role))
+    .map((item) => ({
+      id: item.id,
+      role: item.role,
+      content: item.content,
+      created_at: item.created_at,
+    }))
 }
 
 async function ensureSession() {
