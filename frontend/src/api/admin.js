@@ -71,3 +71,24 @@ export function updateAdminCategoryStatus(categoryId, payload) {
 export function deleteAdminCategory(categoryId) {
   return request.delete(`/admin/categories/${categoryId}`)
 }
+
+export function uploadKbDocument(payload) {
+  return request.post('/admin/knowledge/documents', payload)
+}
+
+export function listKbDocuments(params = {}) {
+  return request.get('/admin/knowledge/documents', { params })
+}
+
+export function deleteKbDocument(documentId) {
+  return request.delete(`/admin/knowledge/documents/${documentId}`)
+}
+
+export function uploadKbDocumentFile(title, file) {
+  const formData = new FormData()
+  formData.append('title', title)
+  formData.append('file', file)
+  return request.post('/admin/knowledge/documents/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}

@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { createMyProduct, deleteMyProduct, getMyProducts, updateMyProduct } from '@/api/seller'
+import { createMyProduct, deleteMyProduct, getMyProducts, updateMyProduct, uploadProductImage } from '@/api/seller'
 import { getCategories } from '@/api/category'
 
 const loading = ref(false)
@@ -18,22 +18,13 @@ const FALLBACK_IMAGE =
     '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#fff0ec" offset="0"/><stop stop-color="#ffe2cb" offset="1"/></linearGradient></defs><rect fill="url(#g)" width="300" height="200" rx="18"/><text x="50%" y="46%" dominant-baseline="middle" text-anchor="middle" font-size="20" fill="#c14a33" font-family="Arial">商品图</text><text x="50%" y="58%" dominant-baseline="middle" text-anchor="middle" font-size="14" fill="#9d5e49" font-family="Arial">未设置</text></svg>'
   )
 
-function normalizeImageUrl(rawUrl) {
-  const input = String(rawUrl || '').trim()
-  if (!input) return ''
-  try {
-    const parsed = new URL(input)
-    const candidate = parsed.searchParams.get('mediaurl') || parsed.searchParams.get('murl')
-    if (candidate) {
-      const direct = new URL(candidate)
-      if (['http:', 'https:'].includes(direct.protocol)) {
-        return direct.toString()
-      }
-    }
-    return parsed.toString()
-  } catch {
-    return input
-  }
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1'
+const BACKEND_ORIGIN = API_BASE.replace(/\/api\/v1\/?$/, '')
+
+function resolveImageUrl(url) {
+  if (!url) return FALLBACK_IMAGE
+  if (url.startsWith('/uploads/')) return BACKEND_ORIGIN + url
+  return url
 }
 
 const form = reactive({
@@ -42,8 +33,10 @@ const form = reactive({
   stock: 0,
   price: 0,
   category_id: null,
-  image_urls: [''],
+  image_urls: [],
 })
+
+const imageUploading = ref(false)
 
 function statusType(status) {
   if (status === 'approved') return 'success'
@@ -66,19 +59,17 @@ function resetForm() {
   form.stock = 0
   form.price = 0
   form.category_id = null
-  form.image_urls = ['']
+  form.image_urls = []
   editingId.value = null
 }
 
 function normalizeProducts(data) {
   return (data || []).map((item) => {
-    const imageUrls = Array.isArray(item.image_urls)
-      ? item.image_urls.map((url) => normalizeImageUrl(url)).filter(Boolean)
-      : []
+    const imageUrls = Array.isArray(item.image_urls) ? item.image_urls.filter(Boolean) : []
     return {
       ...item,
       image_urls: imageUrls,
-      cover: imageUrls[0] || FALLBACK_IMAGE,
+      cover: resolveImageUrl(imageUrls[0]),
     }
   })
 }
@@ -87,39 +78,36 @@ function resolveImage(event) {
   event.target.src = FALLBACK_IMAGE
 }
 
-function addImageInput() {
+async function handleImageUpload(uploadFile) {
   if (form.image_urls.length >= 5) {
     ElMessage.warning('最多上传 5 张商品图')
     return
   }
-  form.image_urls.push('')
-}
-
-function removeImageInput(index) {
-  if (form.image_urls.length <= 1) {
-    form.image_urls[0] = ''
+  const file = uploadFile.raw
+  const ext = file.name.split('.').pop().toLowerCase()
+  const allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp']
+  if (!allowed.includes(ext)) {
+    ElMessage.warning('仅支持 jpg/png/gif/webp 格式')
     return
   }
-  form.image_urls.splice(index, 1)
+  if (file.size > 5 * 1024 * 1024) {
+    ElMessage.warning('图片大小不能超过 5MB')
+    return
+  }
+  imageUploading.value = true
+  try {
+    const res = await uploadProductImage(file)
+    form.image_urls.push(res.data.url)
+    ElMessage.success('图片上传成功')
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '上传失败')
+  } finally {
+    imageUploading.value = false
+  }
 }
 
-function getValidImageUrls() {
-  const list = form.image_urls.map((item) => normalizeImageUrl(item)).filter(Boolean)
-  if (list.length > 5) {
-    throw new Error('最多支持 5 张商品图')
-  }
-  for (const url of list) {
-    let parsed
-    try {
-      parsed = new URL(url)
-    } catch {
-      throw new Error(`图片链接格式不正确：${url}`)
-    }
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
-      throw new Error(`图片链接协议不支持：${url}`)
-    }
-  }
-  return list
+function removeImage(index) {
+  form.image_urls.splice(index, 1)
 }
 
 async function loadProducts() {
@@ -159,7 +147,7 @@ function openEdit(row) {
   form.stock = row.stock
   form.price = Number(row.price)
   form.category_id = row.category_id || null
-  form.image_urls = row.image_urls?.length ? [...row.image_urls] : ['']
+  form.image_urls = row.image_urls?.length ? [...row.image_urls] : []
   dialogVisible.value = true
 }
 
@@ -177,11 +165,9 @@ async function submitForm() {
     return
   }
 
-  let imageUrls
-  try {
-    imageUrls = getValidImageUrls()
-  } catch (error) {
-    ElMessage.warning(error.message)
+  const imageUrls = form.image_urls.filter(Boolean)
+  if (imageUrls.length > 5) {
+    ElMessage.warning('最多支持 5 张商品图')
     return
   }
 
@@ -231,7 +217,7 @@ onMounted(async () => {
     <section class="head page-block">
       <div>
         <h1 class="page-title">商品管理</h1>
-        <p class="page-subtitle">支持商品图片 URL、库存、价格与审核状态全量管理。</p>
+        <p class="page-subtitle">支持商品图片上传、库存、价格与审核状态全量管理。</p>
       </div>
       <div class="head-actions">
         <el-button type="primary" @click="openCreate">新增商品</el-button>
@@ -304,14 +290,30 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
 
-        <el-form-item label="商品图片 URL（最多 5 张）">
-          <div class="image-inputs">
-            <div v-for="(img, index) in form.image_urls" :key="index" class="image-input-row">
-              <el-input v-model="form.image_urls[index]" placeholder="https://example.com/product.jpg" />
-              <el-button type="danger" plain @click="removeImageInput(index)">删除</el-button>
+        <el-form-item label="商品图片（最多 5 张）">
+          <div class="image-upload-area">
+            <div class="image-preview-list">
+              <div v-for="(url, index) in form.image_urls" :key="index" class="image-preview-item">
+                <img :src="resolveImageUrl(url)" class="preview-img" @error="resolveImage" />
+                <el-button class="remove-btn" type="danger" circle size="small" @click="removeImage(index)">X</el-button>
+              </div>
             </div>
+            <el-upload
+              v-if="form.image_urls.length < 5"
+              drag
+              :auto-upload="false"
+              :show-file-list="false"
+              accept=".jpg,.jpeg,.png,.gif,.webp"
+              :on-change="handleImageUpload"
+              :disabled="imageUploading"
+              class="image-uploader"
+            >
+              <div v-loading="imageUploading" class="upload-placeholder">
+                <div>点击或拖拽上传</div>
+                <div class="upload-hint">jpg / png / gif / webp，最大 5MB</div>
+              </div>
+            </el-upload>
           </div>
-          <el-button class="add-image-btn" @click="addImageInput">新增一张图片</el-button>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -353,20 +355,70 @@ onMounted(async () => {
   border: 1px solid var(--jd-border);
 }
 
-.image-inputs {
-  display: grid;
-  gap: 8px;
+.image-upload-area {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.image-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.image-preview-item {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--jd-border);
+}
+
+.preview-img {
   width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
-.image-input-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
+.remove-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0.85;
 }
 
-.add-image-btn {
-  margin-top: 10px;
+.image-uploader {
+  width: 100px;
+  height: 100px;
+}
+
+.image-uploader :deep(.el-upload) {
+  width: 100px;
+  height: 100px;
+}
+
+.image-uploader :deep(.el-upload-dragger) {
+  width: 100px;
+  height: 100px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-placeholder {
+  text-align: center;
+  font-size: 12px;
+  color: #888;
+}
+
+.upload-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #bbb;
 }
 
 @media (max-width: 768px) {
@@ -375,8 +427,8 @@ onMounted(async () => {
     align-items: flex-start;
   }
 
-  .image-input-row {
-    grid-template-columns: 1fr;
+  .image-upload-area {
+    flex-direction: column;
   }
 }
 </style>

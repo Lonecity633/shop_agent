@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.api.routers import auth
@@ -78,3 +80,7 @@ async def health_check():
 
 app.include_router(api_router, prefix=settings.api_v1_str)
 app.include_router(auth.router, prefix="/api")
+
+uploads_dir = Path(__file__).resolve().parent.parent / "data" / "uploads"
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")

@@ -23,3 +23,11 @@ export function updateMyProduct(productId, payload) {
 export function deleteMyProduct(productId) {
   return request.delete(`/seller/products/${productId}`)
 }
+
+export function uploadProductImage(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post('/seller/upload/image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}

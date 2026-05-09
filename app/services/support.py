@@ -88,6 +88,7 @@ async def auto_reply(
             "answer": result.answer,
             "route": result.route,
             "resolved_seller_id": result.resolved_seller_id,
+            "evidences": result.evidences,
         }
     except RateLimitBackendUnavailable as exc:
         raise ServiceError("SUPPORT_RATE_LIMIT_UNAVAILABLE", "客服限流服务暂不可用，请稍后再试", 503) from exc
@@ -102,7 +103,7 @@ async def create_my_support_session(
     current_user: User,
     payload: SupportMySessionCreate,
 ):
-    ensure(current_user.role == UserRole.buyer, "ROLE_DENIED", "仅买家可发起客服会话", 403)
+    ensure(current_user.role in (UserRole.buyer, UserRole.seller), "ROLE_DENIED", "仅买家或卖家可发起客服会话", 403)
     return await support_crud.create_support_session_for_user(
         db,
         user_id=current_user.id,
@@ -115,7 +116,7 @@ async def get_my_latest_support_session(
     db: AsyncSession,
     current_user: User,
 ):
-    ensure(current_user.role == UserRole.buyer, "ROLE_DENIED", "仅买家可访问客服会话", 403)
+    ensure(current_user.role in (UserRole.buyer, UserRole.seller), "ROLE_DENIED", "仅买家或卖家可访问客服会话", 403)
     data = await support_crud.get_latest_support_session_for_user(db, current_user.id)
     if data is None:
         raise ServiceError("SUPPORT_SESSION_NOT_FOUND", "暂无历史会话", 404)
@@ -125,6 +126,6 @@ async def get_my_latest_support_session(
 def _ensure_session_access(current_user: User, session_user_id: int) -> None:
     if current_user.role == UserRole.admin:
         return
-    if current_user.role == UserRole.buyer and current_user.id == session_user_id:
+    if current_user.role in (UserRole.buyer, UserRole.seller) and current_user.id == session_user_id:
         return
     raise ServiceError("SUPPORT_SESSION_FORBIDDEN", "当前用户无权访问该会话", 403)

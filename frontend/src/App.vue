@@ -108,6 +108,7 @@ function contactService() {
             <button class="nav-btn" @click="router.push('/seller/products')">我的商品</button>
             <button class="nav-btn" @click="router.push('/orders')">订单列表</button>
             <button class="nav-btn" @click="goRefunds">退款工单</button>
+            <button class="nav-btn" @click="contactService">客服</button>
           </nav>
           <nav class="right-nav">
             <button class="nav-btn" @click="goProfile">{{ displayName }}</button>

@@ -57,7 +57,7 @@ async function ensureSession() {
   } catch {
     // ignore and fallback to create session
   }
-  const res = await createMySupportSession({ question: '买家发起客服会话', queried_entities: [] })
+  const res = await createMySupportSession({ question: '发起客服会话', queried_entities: [] })
   sessionId.value = res.data?.id
   if (sessionId.value) {
     localStorage.setItem(sessionStorageKey(), String(sessionId.value))
@@ -121,8 +121,8 @@ async function sendMessage() {
 }
 
 async function initChat() {
-  if (role.value !== 'buyer') {
-    ElMessage.warning('当前账号不是买家，无法使用该客服入口')
+  if (role.value !== 'buyer' && role.value !== 'seller') {
+    ElMessage.warning('当前账号无法使用该客服入口')
     return
   }
   loading.value = true

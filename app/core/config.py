@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 30
     llm_temperature: float = 0.2
 
+    support_chroma_persist_dir: str = "./data/chroma"
+    support_chroma_collection: str = "support_kb_chunks"
+    support_retrieval_top_k: int = 5
+    embedding_model: str = "text-embedding-3-small"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

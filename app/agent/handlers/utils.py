@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+from app.agent.prompts import FALLBACKS
+
+
+def history_to_text(history: list[dict]) -> str:
+    if not history:
+        return "（无）"
+    lines = [f"{item.get('role', 'user')}: {item.get('content', '').strip()}" for item in history]
+    return "\n".join(lines)
+
+
+def build_messages(
+    system_prompt: str,
+    history: list[dict],
+    content: str,
+    *,
+    allowed_roles: set[str] | None = None,
+) -> list[dict[str, str]]:
+    if allowed_roles is None:
+        allowed_roles = {"system", "user", "assistant"}
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    for item in history:
+        role = item.get("role", "").strip()
+        text = item.get("content", "").strip()
+        if role in allowed_roles and text:
+            messages.append({"role": role, "content": text})
+    messages.append({"role": "user", "content": content.strip()})
+    return messages
+
+
+def parse_json_object(raw: str) -> dict[str, Any]:
+    text = raw.strip()
+    if not text:
+        return {}
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+    try:
+        payload = json.loads(text)
+        return payload if isinstance(payload, dict) else {}
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
+            return {}
+        try:
+            payload = json.loads(match.group(0))
+            return payload if isinstance(payload, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+
+def parse_intent_output(raw: str) -> str | None:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
+            return None
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    intent = str(payload.get("intent", "")).strip()
+    return intent or None
+
+
+def fallback_order_answer(tool_result: dict[str, Any]) -> str:
+    if tool_result.get("found"):
+        return FALLBACKS["order_fallback_template"].format(
+            order_id=tool_result.get("order_id"),
+            order_status=tool_result.get("order_status"),
+            tracking_no=tool_result.get("tracking_no"),
+            logistics_company=tool_result.get("logistics_company"),
+        )
+    if tool_result.get("error_code") == "INVALID_ARGUMENTS":
+        return FALLBACKS["order_fallback_no_args"]
+    return FALLBACKS["order_fallback_not_found"]

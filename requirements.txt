@@ -13,3 +13,5 @@ alembic==1.16.4
 chromadb==1.1.1
 langchain==0.3.27
 httpx==0.28.1
+PyPDF2==3.0.1
+python-multipart==0.0.20

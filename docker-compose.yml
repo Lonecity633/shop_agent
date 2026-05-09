@@ -23,7 +23,7 @@ services:
     container_name: shop_redis
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:6380:6379"
     volumes:
       - redis_data:/data
     command: ["redis-server", "--appendonly", "yes"]
@@ -54,6 +54,8 @@ services:
       REDIS_PORT: 6379
     ports:
       - "8000:8000"
+    volumes:
+      - upload_data:/workspace/data/uploads
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs').read()"]
       interval: 15s
@@ -76,3 +78,4 @@ services:
 volumes:
   mysql_data:
   redis_data:
+  upload_data:

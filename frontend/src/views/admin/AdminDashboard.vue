@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   arbitrateRefund,
@@ -18,6 +19,8 @@ import {
   updateAdminCategory,
   updateAdminCategoryStatus,
 } from '@/api/admin'
+
+const router = useRouter()
 
 const overviewLoading = ref(false)
 const sellersLoading = ref(false)
@@ -501,6 +504,7 @@ onMounted(refreshAll)
         show-icon
         :closable="false"
       />
+      <el-button @click="router.push('/admin/knowledge')">知识库管理</el-button>
       <el-button type="primary" @click="refreshAll">全量刷新</el-button>
     </section>
 

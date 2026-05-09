@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from PyPDF2 import PdfReader
+import io
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routers.auth import get_current_user
@@ -18,8 +20,10 @@ from app.schemas.admin import (
 )
 from app.schemas.category import CategoryCreate, CategoryOut, CategoryStatusUpdate, CategoryUpdate
 from app.schemas.common import APIResponse, PagedData
+from app.schemas.knowledge import KBDocumentCreate, KBDocumentOut
 from app.schemas.refund import RefundAdminReview, RefundExecutePayload, RefundOut
 from app.services import admin as admin_service
+from app.services import knowledge as kb_service
 from app.services.common import ServiceError
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -310,3 +314,77 @@ async def execute_refund_payment(
     except ServiceError as exc:
         _handle_error(exc)
     return {"code": "OK", "message": "退款执行完成", "data": refund}
+
+
+# ────────────────────── 知识库管理 ──────────────────────
+
+
+@router.post("/knowledge/documents/upload", response_model=APIResponse[KBDocumentOut], summary="上传知识库文件")
+async def upload_kb_document_file(
+    title: str = Form(..., min_length=1, max_length=255),
+    file: UploadFile = File(..., description="支持 .txt / .md 文件"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not file.filename or not file.filename.lower().endswith(('.txt', '.md', '.pdf')):
+        raise ServiceError("KB_INVALID_FILE", "仅支持 .txt / .md / .pdf 文件", 400)
+    raw = await file.read()
+    filename_lower = file.filename.lower()
+    if filename_lower.endswith('.pdf'):
+        try:
+            reader = PdfReader(io.BytesIO(raw))
+            content = "\n".join(page.extract_text() or "" for page in reader.pages)
+        except Exception:
+            raise ServiceError("KB_PDF_PARSE_FAILED", "PDF 文件解析失败", 400)
+    else:
+        try:
+            content = raw.decode('utf-8')
+        except UnicodeDecodeError:
+            content = raw.decode('utf-8', errors='ignore')
+    if not content.strip():
+        raise ServiceError("KB_EMPTY_FILE", "文件内容为空", 400)
+    try:
+        doc = await kb_service.upload_document(db, current_user, title, content)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "文档上传成功", "data": doc}
+
+
+@router.post("/knowledge/documents", response_model=APIResponse[KBDocumentOut], summary="上传知识库文档")
+async def upload_kb_document(
+    payload: KBDocumentCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        doc = await kb_service.upload_document(db, current_user, payload.title, payload.content)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "文档上传成功", "data": doc}
+
+
+@router.get("/knowledge/documents", response_model=APIResponse[PagedData[KBDocumentOut]], summary="知识库文档列表")
+async def list_kb_documents(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await kb_service.list_documents(db, current_user, page=page, page_size=page_size)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "查询成功", "data": data}
+
+
+@router.delete("/knowledge/documents/{document_id}", response_model=APIResponse, summary="删除知识库文档")
+async def delete_kb_document(
+    document_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        await kb_service.delete_document_by_id(db, current_user, document_id)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "文档已删除", "data": None}

@@ -3,13 +3,13 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ProductBase(BaseModel):
     name: str = Field(..., description="商品名称", min_length=1, max_length=120)
     description: str = Field("", description="商品描述")
-    image_urls: list[AnyHttpUrl] = Field(default_factory=list, max_length=5, description="商品图片URL列表")
+    image_urls: list[str] = Field(default_factory=list, max_length=5, description="商品图片URL列表")
     stock: int = Field(0, ge=0, description="库存")
     price: Decimal = Field(..., gt=0, description="价格")
     category_id: int = Field(..., gt=0, description="分类ID")
@@ -37,7 +37,7 @@ class ProductCreate(ProductBase):
 class ProductUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = None
-    image_urls: list[AnyHttpUrl] | None = Field(default=None, max_length=5)
+    image_urls: list[str] | None = Field(default=None, max_length=5)
     stock: int | None = Field(default=None, ge=0)
     price: Decimal | None = Field(default=None, gt=0)
     category_id: int | None = Field(default=None, gt=0)
