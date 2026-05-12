@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.comment import Comment
 from app.models.order import Order, OrderStatusLog
+from app.models.payment import PaymentTransaction
 from app.models.refund import RefundTicket
 from app.models.support import SupportMessage, SupportSession
 from app.models.user import User
@@ -18,6 +19,12 @@ async def get_user_overview(db: AsyncSession, user_id: int) -> dict:
         raise ValueError("用户不存在")
 
     order_result = await db.execute(select(Order).where(Order.user_id == user_id).order_by(Order.id.desc()).limit(10))
+    payment_result = await db.execute(
+        select(PaymentTransaction)
+        .where(PaymentTransaction.buyer_id == user_id)
+        .order_by(PaymentTransaction.id.desc())
+        .limit(10)
+    )
     refund_result = await db.execute(select(RefundTicket).where(RefundTicket.buyer_id == user_id).order_by(RefundTicket.id.desc()).limit(10))
     comment_result = await db.execute(select(Comment).where(Comment.user_id == user_id).order_by(Comment.id.desc()).limit(10))
 
@@ -36,6 +43,20 @@ async def get_user_overview(db: AsyncSession, user_id: int) -> dict:
                 "created_at": o.created_at,
             }
             for o in order_result.scalars().all()
+        ],
+        "recent_payments": [
+            {
+                "payment_no": p.payment_no,
+                "order_id": p.order_id,
+                "status": p.status.value,
+                "channel": p.channel,
+                "amount": str(p.amount),
+                "failure_reason": p.failure_reason,
+                "provider_trade_no": p.provider_trade_no,
+                "created_at": p.created_at,
+                "paid_at": p.paid_at,
+            }
+            for p in payment_result.scalars().all()
         ],
         "recent_refunds": [
             {
@@ -73,6 +94,10 @@ async def get_order_timeline(db: AsyncSession, order_id: int) -> dict:
     refund_result = await db.execute(
         select(RefundTicket).where(RefundTicket.order_id == order_id).order_by(RefundTicket.id.asc())
     )
+    payment_result = await db.execute(
+        select(PaymentTransaction).where(PaymentTransaction.order_id == order_id).order_by(PaymentTransaction.id.desc())
+    )
+    payments = payment_result.scalars().all()
 
     return {
         "order_id": order_id,
@@ -82,6 +107,19 @@ async def get_order_timeline(db: AsyncSession, order_id: int) -> dict:
             "pay_channel": order.pay_channel,
             "paid_at": order.paid_at,
             "close_reason": order.close_reason,
+            "latest_transaction": (
+                {
+                    "payment_no": payments[0].payment_no,
+                    "status": payments[0].status.value,
+                    "channel": payments[0].channel,
+                    "provider_trade_no": payments[0].provider_trade_no,
+                    "failure_reason": payments[0].failure_reason,
+                    "created_at": payments[0].created_at,
+                    "paid_at": payments[0].paid_at,
+                }
+                if payments
+                else None
+            ),
         },
         "status_logs": [
             {

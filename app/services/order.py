@@ -50,12 +50,13 @@ async def create_order(db: AsyncSession, current_user: User, payload: OrderCreat
 
 
 async def pay_order(db: AsyncSession, current_user: User, order_no: str, payload: OrderPayPayload):
-    order = await order_crud.get_order_for_update_by_no(db, order_no)
-    ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
-    ensure(current_user.role == UserRole.buyer and order.user_id == current_user.id, "ORDER_FORBIDDEN", "仅订单买家可支付", 403)
-
     try:
-        return await order_crud.pay_order(db, order, current_user, payload.pay_channel)
+        from app.services import payment as payment_service
+
+        payment = await payment_service.pay_order_compat(db, current_user, order_no, payload.pay_channel)
+        order = await order_crud.get_order(db, payment.order_id)
+        ensure(order is not None, "ORDER_NOT_FOUND", "订单不存在", 404)
+        return order
     except ValueError as exc:
         raise ServiceError("ORDER_NOT_PAYABLE", str(exc), 400) from exc
 

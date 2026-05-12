@@ -70,6 +70,7 @@ class Order(Base):
     status_logs = relationship("OrderStatusLog", back_populates="order", cascade="all, delete-orphan")
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     refund_tickets = relationship("RefundTicket", back_populates="order", cascade="all, delete-orphan")
+    payment_transactions = relationship("PaymentTransaction", back_populates="order", cascade="all, delete-orphan")
 
 
 class OrderStatusLog(Base):

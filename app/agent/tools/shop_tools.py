@@ -10,7 +10,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.order import Order
+from app.models.payment import PaymentTransaction
 from app.models.product import Product, ProductStatus
+from app.models.refund import RefundTicket
 from app.models.user import User, UserRole
 
 GET_ORDER_DETAILS_TOOL: dict[str, Any] = {
@@ -103,6 +105,8 @@ async def execute_get_order_details(db: AsyncSession, *, current_user: User, ord
         "pay_status": safe_snapshot.get("pay_status"),
         "logistics_company": safe_snapshot.get("logistics_company"),
         "tracking_no": safe_snapshot.get("tracking_no"),
+        "latest_payment": safe_snapshot.get("latest_payment"),
+        "refunds": safe_snapshot.get("refunds"),
     }
 
 
@@ -141,15 +145,55 @@ async def fetch_order_snapshot(db: AsyncSession, order_id: int) -> dict | None:
     if row is None:
         return None
     order, product = row
+    payment_result = await db.execute(
+        select(PaymentTransaction)
+        .where(PaymentTransaction.order_id == order.id)
+        .order_by(PaymentTransaction.id.desc())
+        .limit(1)
+    )
+    latest_payment = payment_result.scalar_one_or_none()
+    refund_result = await db.execute(
+        select(RefundTicket).where(RefundTicket.order_id == order.id).order_by(RefundTicket.id.desc()).limit(3)
+    )
+    refunds = refund_result.scalars().all()
     return {
         "order_id": order.id,
         "status": order.status.value,
         "pay_status": order.pay_status.value,
+        "pay_channel": order.pay_channel,
+        "paid_at": order.paid_at,
+        "pay_amount": order.pay_amount,
         "tracking_no": order.tracking_no,
         "logistics_company": order.logistics_company,
         "product_id": product.id,
         "product_name": product.name,
         "seller_id": product.seller_id,
+        "latest_payment": (
+            {
+                "payment_no": latest_payment.payment_no,
+                "status": latest_payment.status.value,
+                "channel": latest_payment.channel,
+                "amount": latest_payment.amount,
+                "provider_trade_no": latest_payment.provider_trade_no,
+                "failure_reason": latest_payment.failure_reason,
+                "paid_at": latest_payment.paid_at,
+                "created_at": latest_payment.created_at,
+            }
+            if latest_payment is not None
+            else None
+        ),
+        "refunds": [
+            {
+                "refund_id": item.id,
+                "status": item.status.value,
+                "amount": item.amount,
+                "reason": item.reason,
+                "fail_reason": item.fail_reason,
+                "processed_at": item.processed_at,
+                "updated_at": item.updated_at,
+            }
+            for item in refunds
+        ],
     }
 
 

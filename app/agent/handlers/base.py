@@ -16,6 +16,7 @@ class HandlerContext:
     current_user: User
     content: str
     history: list[dict]
+    session_id: int
     order_id: int | None
     product_id: int | None
     llm_client: LLMClient

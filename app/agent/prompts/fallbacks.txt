@@ -26,7 +26,7 @@
 你好，请提供订单号或商品信息，我来继续协助你。
 
 [order_fallback_template]
-订单 {order_id} 当前状态 {order_status}，物流单号 {tracking_no}（{logistics_company}）。
+订单 {order_id} 当前状态 {order_status}，支付状态 {pay_status}{payment_text}{refund_text}，物流单号 {tracking_no}（{logistics_company}）。
 
 [order_fallback_no_args]
 请问您的订单号是多少？

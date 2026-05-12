@@ -63,6 +63,36 @@ services:
       retries: 10
       start_period: 20s
 
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shop_mcp_server
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MCP_SERVER_HOST: 0.0.0.0
+      MCP_SERVER_PORT: 9000
+    command: ["python", "-m", "app.mcp.server"]
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('127.0.0.1', 9000), 3); s.close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   frontend:
     build:
       context: ./frontend

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.handlers.base import HandlerContext, HandlerResult, IntentHandler
 from app.agent.handlers.utils import history_to_text
+from app.agent.mcp_client import McpToolClient
 from app.agent.prompts import FALLBACKS, POLICY
 from app.agent.retrieval import retrieve
 from app.core.config import settings
@@ -13,13 +14,17 @@ from app.models.product import Product
 
 
 class PolicyHandler(IntentHandler):
+    def __init__(self):
+        self.mcp_client = McpToolClient()
+
     async def handle(self, ctx: HandlerContext) -> HandlerResult:
         seller_id = await self._resolve_seller_id(ctx.db, order_id=ctx.order_id, product_id=ctx.product_id)
 
-        chunks = await retrieve(ctx.db, ctx.content, top_k=settings.support_retrieval_top_k)
+        chunks, tool_source = await self._query_policy_kb(ctx)
         evidences = [
             {
-                "tool": "knowledge_retrieval",
+                "tool": "query_policy_kb",
+                "source": tool_source,
                 "chunk_id": c["chunk_id"],
                 "document_title": c["document_title"],
                 "score": c["score"],
@@ -48,6 +53,22 @@ class PolicyHandler(IntentHandler):
         except Exception:
             answer = FALLBACKS["policy_no_input"]
         return HandlerResult(answer=answer, resolved_seller_id=seller_id, evidences=evidences)
+
+    async def _query_policy_kb(self, ctx: HandlerContext) -> tuple[list[dict], str]:
+        try:
+            result = await self.mcp_client.call_tool(
+                ctx.db,
+                current_user=ctx.current_user,
+                session_id=ctx.session_id,
+                tool_name="query_policy_kb",
+                arguments={"question": ctx.content, "top_k": settings.support_retrieval_top_k},
+            )
+            chunks = result.get("data") or []
+            return (chunks if isinstance(chunks, list) else []), "mcp"
+        except Exception:
+            if not settings.mcp_fallback_enabled:
+                return [], "mcp_failed"
+            return await retrieve(ctx.db, ctx.content, top_k=settings.support_retrieval_top_k), "local_fallback"
 
     @staticmethod
     async def _resolve_seller_id(db: AsyncSession, *, order_id: int | None, product_id: int | None) -> int | None:

@@ -10,6 +10,7 @@ class SupportOverviewOut(BaseModel):
     email: str
     role: str
     recent_orders: list[dict[str, Any]]
+    recent_payments: list[dict[str, Any]]
     recent_refunds: list[dict[str, Any]]
     recent_comments: list[dict[str, Any]]
 

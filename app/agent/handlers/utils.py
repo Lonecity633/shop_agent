@@ -75,9 +75,22 @@ def parse_intent_output(raw: str) -> str | None:
 
 def fallback_order_answer(tool_result: dict[str, Any]) -> str:
     if tool_result.get("found"):
+        latest_payment = tool_result.get("latest_payment") or {}
+        refunds = tool_result.get("refunds") or []
+        payment_text = ""
+        if latest_payment:
+            payment_text = f"，最近支付流水状态 {latest_payment.get('status')}"
+            if latest_payment.get("failure_reason"):
+                payment_text += f"，失败原因：{latest_payment.get('failure_reason')}"
+        refund_text = ""
+        if refunds:
+            refund_text = f"，最近退款状态 {refunds[0].get('status')}"
         return FALLBACKS["order_fallback_template"].format(
             order_id=tool_result.get("order_id"),
             order_status=tool_result.get("order_status"),
+            pay_status=tool_result.get("pay_status"),
+            payment_text=payment_text,
+            refund_text=refund_text,
             tracking_no=tool_result.get("tracking_no"),
             logistics_company=tool_result.get("logistics_company"),
         )

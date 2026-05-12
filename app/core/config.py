@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 30
     llm_temperature: float = 0.2
 
+    mcp_server_url: str = "http://mcp-server:9000/mcp"
+    mcp_internal_secret: str = "change-this-in-production"
+    mcp_tool_timeout_seconds: int = 5
+    mcp_fallback_enabled: bool = True
+    mcp_server_host: str = "0.0.0.0"
+    mcp_server_port: int = 9000
+
     support_chroma_persist_dir: str = "./data/chroma"
     support_chroma_collection: str = "support_kb_chunks"
     support_retrieval_top_k: int = 5

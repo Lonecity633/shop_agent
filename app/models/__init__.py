@@ -5,6 +5,7 @@ from app.models.comment import Comment
 from app.models.favorite import Favorite
 from app.models.operation_audit import OperationAudit
 from app.models.order import Order, OrderItem
+from app.models.payment import PaymentTransaction
 from app.models.product import Product
 from app.models.refund import RefundTicket
 from app.models.seller_profile import SellerProfile
@@ -19,6 +20,7 @@ __all__ = [
     "CartItem",
     "Order",
     "OrderItem",
+    "PaymentTransaction",
     "SellerProfile",
     "Comment",
     "OperationAudit",

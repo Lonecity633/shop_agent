@@ -5,11 +5,16 @@ from typing import Any
 
 from app.agent.handlers.base import HandlerContext, HandlerResult, IntentHandler
 from app.agent.handlers.utils import build_messages, fallback_order_answer, parse_json_object
+from app.agent.mcp_client import McpToolClient
 from app.agent.prompts import FALLBACKS, ORDER_QUERY
 from app.agent.tools.shop_tools import GET_ORDER_DETAILS_TOOL, execute_get_order_details
+from app.core.config import settings
 
 
 class OrderQueryHandler(IntentHandler):
+    def __init__(self):
+        self.mcp_client = McpToolClient()
+
     async def handle(self, ctx: HandlerContext) -> HandlerResult:
         messages = build_messages(ORDER_QUERY, ctx.history, ctx.content, allowed_roles={"user", "assistant"})
         try:
@@ -36,11 +41,27 @@ class OrderQueryHandler(IntentHandler):
         raw_order_id = args.get("order_id")
         order_id = str(raw_order_id).strip() if raw_order_id is not None else ""
 
-        tool_result = await execute_get_order_details(ctx.db, current_user=ctx.current_user, order_id=order_id)
+        tool_name = "get_order_details"
+        try:
+            mcp_result = await self.mcp_client.call_tool(
+                ctx.db,
+                current_user=ctx.current_user,
+                session_id=ctx.session_id,
+                tool_name=tool_name,
+                arguments={"order_id": order_id},
+            )
+            tool_result = mcp_result.get("data") or {}
+            tool_source = "mcp"
+        except Exception:
+            if not settings.mcp_fallback_enabled:
+                return HandlerResult(answer=FALLBACKS["order_timeout"])
+            tool_result = await execute_get_order_details(ctx.db, current_user=ctx.current_user, order_id=order_id)
+            tool_source = "local_fallback"
         tool_payload = json.dumps(tool_result, ensure_ascii=False)
         evidences = [
             {
-                "tool": "get_order_details",
+                "tool": tool_name,
+                "source": tool_source,
                 "args": {"order_id": order_id},
                 "result": tool_result,
             }

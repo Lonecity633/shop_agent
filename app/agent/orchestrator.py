@@ -69,6 +69,7 @@ class SupportAgentOrchestrator:
                 current_user=current_user,
                 content=content,
                 history=history,
+                session_id=session_id,
                 order_id=order_id,
                 product_id=product_id,
                 llm_client=self.llm_client,

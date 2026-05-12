@@ -2,7 +2,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
-import { createOrderComment, getOrderLogs, getOrderStatus, getOrders, payOrder, receiveOrder, shipOrder, updateOrderStatus } from '@/api/order'
+import { createOrderComment, getOrderLogs, getOrderStatus, getOrders, receiveOrder, shipOrder, updateOrderStatus } from '@/api/order'
+import { initiatePayment, mockPaymentCallback } from '@/api/payment'
 import { createRefund } from '@/api/refund'
 
 const authStore = useAuthStore()
@@ -42,6 +43,17 @@ const refundForm = reactive({
   reason: '',
   buyer_note: '',
 })
+
+const paymentDialogVisible = ref(false)
+const paymentSubmitting = ref(false)
+const paymentLoading = ref(false)
+const currentPaymentOrder = ref(null)
+const currentPayment = ref(null)
+const paymentForm = reactive({
+  channel: 'mock_alipay',
+  failure_reason: '余额不足，模拟支付失败',
+})
+const canSubmitPayment = computed(() => currentPayment.value?.status === 'pending')
 
 function statusType(status) {
   if (status === 'pending_paid') return 'warning'
@@ -196,15 +208,45 @@ async function handleCancelOrder(order) {
 }
 
 async function handlePayOrder(order) {
-  updatingStatusId.value = order.order_no
+  currentPaymentOrder.value = order
+  currentPayment.value = null
+  paymentForm.channel = 'mock_alipay'
+  paymentForm.failure_reason = '余额不足，模拟支付失败'
+  paymentDialogVisible.value = true
+  paymentLoading.value = true
   try {
-    const res = await payOrder(order.order_no, 'simulated')
-    order.status = res.data?.status || order.status
-    order.pay_status = res.data?.pay_status || order.pay_status
-    ElMessage.success(res.message || '支付成功')
+    const res = await initiatePayment(order.order_no, paymentForm.channel)
+    currentPayment.value = res.data
   } catch (error) {
-    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '支付失败')
+    paymentDialogVisible.value = false
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '发起支付失败')
   } finally {
+    paymentLoading.value = false
+  }
+}
+
+async function submitMockPayment(result) {
+  if (!currentPayment.value?.payment_no || !currentPaymentOrder.value) return
+  paymentSubmitting.value = true
+  updatingStatusId.value = currentPaymentOrder.value.order_no
+  try {
+    const res = await mockPaymentCallback(
+      currentPayment.value.payment_no,
+      result,
+      result === 'failed' ? paymentForm.failure_reason.trim() : ''
+    )
+    currentPayment.value = res.data
+    if (result === 'success') {
+      ElMessage.success('模拟支付成功')
+      paymentDialogVisible.value = false
+      await fetchOrders()
+    } else {
+      ElMessage.warning('模拟支付失败，订单仍可重新支付')
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '支付回调处理失败')
+  } finally {
+    paymentSubmitting.value = false
     updatingStatusId.value = null
   }
 }
@@ -444,6 +486,54 @@ onMounted(fetchOrders)
       </template>
     </el-dialog>
 
+    <el-dialog v-model="paymentDialogVisible" title="模拟支付宝支付" width="520px">
+      <div v-loading="paymentLoading" class="payment-panel">
+        <div class="payment-row">
+          <span>订单号</span>
+          <strong>{{ currentPaymentOrder?.order_no || '-' }}</strong>
+        </div>
+        <div class="payment-row">
+          <span>支付金额</span>
+          <strong>¥{{ Number(currentPaymentOrder?.pay_amount || currentPaymentOrder?.total_price || 0).toFixed(2) }}</strong>
+        </div>
+        <div class="payment-row">
+          <span>支付渠道</span>
+          <el-select v-model="paymentForm.channel" :disabled="Boolean(currentPayment)" size="small" style="width: 160px">
+            <el-option label="支付宝沙箱模拟" value="mock_alipay" />
+            <el-option label="平台模拟支付" value="mock_platform" />
+          </el-select>
+        </div>
+        <div class="payment-row">
+          <span>支付流水</span>
+          <strong>{{ currentPayment?.payment_no || '-' }}</strong>
+        </div>
+        <div class="payment-row">
+          <span>流水状态</span>
+          <el-tag v-if="currentPayment" :type="currentPayment.status === 'failed' ? 'danger' : currentPayment.status === 'succeeded' ? 'success' : 'warning'">
+            {{ currentPayment.status }}
+          </el-tag>
+          <span v-else>-</span>
+        </div>
+        <el-input
+          v-model="paymentForm.failure_reason"
+          type="textarea"
+          :rows="2"
+          maxlength="2000"
+          show-word-limit
+          placeholder="模拟失败原因"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="paymentDialogVisible = false">取消</el-button>
+        <el-button :disabled="!canSubmitPayment" :loading="paymentSubmitting" @click="submitMockPayment('failed')">
+          模拟失败
+        </el-button>
+        <el-button type="primary" :disabled="!canSubmitPayment" :loading="paymentSubmitting" @click="submitMockPayment('success')">
+          模拟成功
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="logDialogVisible" :title="`订单 ${currentLogOrderNo || currentLogOrderId || ''} 状态轨迹`" width="640px">
       <el-empty v-if="!orderLogs.length" description="该订单暂无状态变更记录" />
       <el-timeline v-else>
@@ -540,10 +630,42 @@ onMounted(fetchOrders)
   font-size: 13px;
 }
 
+.payment-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.payment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.payment-row span {
+  color: #6d7481;
+}
+
+.payment-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 @media (max-width: 768px) {
   .orders-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .payment-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .payment-row strong {
+    text-align: left;
   }
 }
 </style>
