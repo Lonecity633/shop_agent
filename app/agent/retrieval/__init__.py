@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
-from sqlalchemy import delete as sql_delete, select
+from sqlalchemy import delete as sql_delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.retrieval.client import ChromaClient
@@ -36,14 +37,18 @@ async def retrieve(db: AsyncSession, query: str, top_k: int | None = None) -> li
     if top_k is None:
         top_k = settings.support_retrieval_top_k
 
-    embedding_svc = _get_embedding()
-    chroma = _get_chroma()
+    try:
+        embedding_svc = _get_embedding()
+        chroma = _get_chroma()
 
-    query_embedding = await embedding_svc.embed_query(query)
-    raw_results = await chroma.query(query_embedding, top_k)
+        query_embedding = await embedding_svc.embed_query(query)
+        raw_results = await chroma.query(query_embedding, top_k)
+    except Exception:
+        logger.exception("向量检索失败，降级到数据库关键词检索")
+        return await keyword_retrieve(db, query, top_k=top_k)
 
     if not raw_results:
-        return []
+        return await keyword_retrieve(db, query, top_k=top_k)
 
     chunk_ids = [r["chunk_id"] for r in raw_results]
     stmt = (
@@ -69,6 +74,87 @@ async def retrieve(db: AsyncSession, query: str, top_k: int | None = None) -> li
                 "document_id": info["document_id"],
             })
     return results
+
+
+async def keyword_retrieve(db: AsyncSession, query: str, top_k: int | None = None) -> list[dict]:
+    if top_k is None:
+        top_k = settings.support_retrieval_top_k
+    limit = max(1, min(int(top_k), 10))
+
+    tokens = _extract_query_tokens(query)
+    stmt = (
+        select(KBChunk.id, KBChunk.content, KBChunk.document_id, KBDocument.title)
+        .join(KBDocument, KBDocument.id == KBChunk.document_id)
+        .where(KBDocument.status == "active")
+    )
+    if tokens:
+        conditions = []
+        for token in tokens:
+            pattern = f"%{token}%"
+            conditions.append(KBChunk.content.like(pattern))
+            conditions.append(KBDocument.title.like(pattern))
+        stmt = stmt.where(or_(*conditions))
+
+    rows = (await db.execute(stmt.order_by(KBDocument.id.desc(), KBChunk.chunk_index.asc()).limit(limit))).all()
+    if not rows and tokens:
+        rows = (
+            await db.execute(
+                select(KBChunk.id, KBChunk.content, KBChunk.document_id, KBDocument.title)
+                .join(KBDocument, KBDocument.id == KBChunk.document_id)
+                .where(KBDocument.status == "active")
+                .order_by(KBDocument.id.desc(), KBChunk.chunk_index.asc())
+                .limit(limit)
+            )
+        ).all()
+
+    return [
+        {
+            "chunk_id": row[0],
+            "content": row[1],
+            "score": _keyword_score(row[1], row[3], tokens),
+            "document_title": row[3],
+            "document_id": row[2],
+        }
+        for row in rows
+    ]
+
+
+def _extract_query_tokens(query: str) -> list[str]:
+    text = re.sub(r"[，。！？、,.!?;；:：()\[\]【】\"'“”‘’\s]+", " ", query.strip())
+    candidates = [item for item in text.split(" ") if item]
+    stopwords = {
+        "我",
+        "想",
+        "问",
+        "一下",
+        "请问",
+        "咨询",
+        "平台",
+        "规则",
+        "政策",
+        "相关",
+        "是什么",
+        "有哪些",
+        "怎么",
+        "如何",
+        "可以",
+        "吗",
+    }
+    tokens: list[str] = []
+    for item in candidates:
+        cleaned = item.strip()
+        if cleaned in stopwords:
+            continue
+        if len(cleaned) >= 2:
+            tokens.append(cleaned)
+    return tokens[:6]
+
+
+def _keyword_score(content: str, title: str, tokens: list[str]) -> float:
+    if not tokens:
+        return 0.25
+    hit_count = sum(1 for token in tokens if token in content or token in title)
+    return round(min(0.8, 0.3 + hit_count * 0.1), 4)
 
 
 async def ingest_document(db: AsyncSession, title: str, content: str) -> dict:

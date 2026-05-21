@@ -13,5 +13,17 @@ export function getSupportMessages(sessionId) {
 }
 
 export function autoReply(sessionId, payload) {
-  return request.post(`/support/sessions/${sessionId}/reply`, payload)
+  return request.post(`/support/sessions/${sessionId}/reply`, payload, { timeout: 45000 })
+}
+
+export function createSupportTicket(payload) {
+  return request.post('/support/tickets', payload)
+}
+
+export function getMySupportTickets() {
+  return request.get('/support/me/tickets')
+}
+
+export function getSupportTicket(ticketId) {
+  return request.get(`/support/tickets/${ticketId}`)
 }

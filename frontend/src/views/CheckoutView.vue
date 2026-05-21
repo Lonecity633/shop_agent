@@ -1,16 +1,20 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createAddress, deleteAddress, getAddresses, updateAddress } from '@/api/address'
 import { getCartItems, removeCartItem } from '@/api/cart'
 import { createOrder } from '@/api/order'
+import { getProductById } from '@/api/product'
 
+const route = useRoute()
 const router = useRouter()
 
 const loading = ref(false)
 const submitLoading = ref(false)
 const cartItems = ref([])
+const directProduct = ref(null)
+const directQuantity = ref(1)
 const addresses = ref([])
 const selectedAddressId = ref(null)
 
@@ -28,10 +32,41 @@ const addressForm = reactive({
   is_default: false,
 })
 
-const selectedItems = computed(() => (cartItems.value || []).filter((item) => item.selected))
+const FALLBACK_IMAGE =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#fff0ec" offset="0"/><stop stop-color="#ffe2cb" offset="1"/></linearGradient></defs><rect fill="url(#g)" width="160" height="120" rx="12"/><text x="50%" y="48%" dominant-baseline="middle" text-anchor="middle" font-size="14" fill="#c14a33" font-family="Arial">商品图</text><text x="50%" y="62%" dominant-baseline="middle" text-anchor="middle" font-size="11" fill="#9d5e49" font-family="Arial">暂无</text></svg>'
+  )
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1'
+const BACKEND_ORIGIN = API_BASE.replace(/\/api\/v1\/?$/, '')
+
+const isDirectMode = computed(() => route.query.mode === 'direct')
+const selectedItems = computed(() => {
+  if (isDirectMode.value) {
+    if (!directProduct.value) return []
+    return [
+      {
+        id: `direct-${directProduct.value.id}`,
+        product_id: directProduct.value.id,
+        product: directProduct.value,
+        quantity: directQuantity.value,
+      },
+    ]
+  }
+  return (cartItems.value || []).filter((item) => item.selected)
+})
 const selectedCount = computed(() => selectedItems.value.length)
 const hasSelectedItems = computed(() => selectedCount.value > 0)
 const hasAddresses = computed(() => addresses.value.length > 0)
+const pageSubtitle = computed(() =>
+  isDirectMode.value ? '确认商品、数量与收货地址后提交订单。' : '确认购物车商品与收货地址后提交订单。'
+)
+const goodsTitle = computed(() => (isDirectMode.value ? '立即购买商品' : '购物车商品'))
+const goodsEmptyDescription = computed(() =>
+  isDirectMode.value ? '未找到要购买的商品，请返回商城重新选择' : '购物车暂无勾选商品，请先去购物车勾选'
+)
+const backButtonText = computed(() => (isDirectMode.value ? '返回商城' : '返回购物车'))
+const canSubmit = computed(() => hasSelectedItems.value && Boolean(selectedAddressId.value))
 
 const totalAmount = computed(() => {
   return selectedItems.value.reduce((sum, item) => {
@@ -48,6 +83,44 @@ function formatPrice(value) {
 
 function normalizeAddressLabel(address) {
   return `${address.province}${address.city}${address.district || ''}${address.detail_address}`
+}
+
+function normalizeImageUrl(rawUrl) {
+  const input = String(rawUrl || '').trim()
+  if (!input) return ''
+  if (input.startsWith('/uploads/')) return BACKEND_ORIGIN + input
+  return input
+}
+
+function normalizeProduct(product) {
+  const imageUrls = Array.isArray(product?.image_urls)
+    ? product.image_urls.map((url) => normalizeImageUrl(url)).filter(Boolean)
+    : []
+  return {
+    ...product,
+    image_urls: imageUrls,
+    cover: imageUrls[0] || FALLBACK_IMAGE,
+  }
+}
+
+function productCover(product) {
+  return product?.cover || normalizeImageUrl(product?.image_urls?.[0]) || FALLBACK_IMAGE
+}
+
+function resolveImage(event) {
+  event.target.src = FALLBACK_IMAGE
+}
+
+function directProductId() {
+  const id = Number(route.query.product_id)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function normalizeDirectQuantity(product) {
+  const requested = Number(route.query.quantity || 1)
+  const baseQuantity = Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : 1
+  const stock = Number(product?.stock || 1)
+  return Math.min(baseQuantity, Math.max(stock, 1))
 }
 
 function resetAddressForm() {
@@ -83,6 +156,25 @@ async function fetchCartItems() {
   cartItems.value = res.data || []
 }
 
+async function fetchDirectProduct() {
+  const productId = directProductId()
+  if (!productId) {
+    directProduct.value = null
+    directQuantity.value = 1
+    ElMessage.warning('缺少要购买的商品，请返回商城重新选择')
+    return
+  }
+  const res = await getProductById(productId)
+  if (!res.data) {
+    directProduct.value = null
+    directQuantity.value = 1
+    ElMessage.warning('商品不存在或暂不可购买')
+    return
+  }
+  directProduct.value = normalizeProduct(res.data)
+  directQuantity.value = normalizeDirectQuantity(directProduct.value)
+}
+
 function applyAddressSelection() {
   const list = addresses.value || []
   if (!list.length) {
@@ -107,7 +199,13 @@ async function fetchAddresses() {
 async function refreshPageData() {
   loading.value = true
   try {
-    await Promise.all([fetchCartItems(), fetchAddresses()])
+    if (isDirectMode.value) {
+      cartItems.value = []
+      await Promise.all([fetchDirectProduct(), fetchAddresses()])
+    } else {
+      directProduct.value = null
+      await Promise.all([fetchCartItems(), fetchAddresses()])
+    }
   } catch (error) {
     ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '加载结算数据失败')
   } finally {
@@ -175,11 +273,29 @@ async function handleDeleteAddress(address) {
 
 async function handleSubmitOrders() {
   if (!hasSelectedItems.value) {
-    ElMessage.warning('请先在购物车勾选需要结算的商品')
+    ElMessage.warning(isDirectMode.value ? '请先选择要购买的商品' : '请先在购物车勾选需要结算的商品')
     return
   }
   if (!selectedAddressId.value) {
     ElMessage.warning('请先选择收货地址')
+    return
+  }
+
+  if (isDirectMode.value) {
+    submitLoading.value = true
+    try {
+      const res = await createOrder({
+        product_id: directProduct.value.id,
+        quantity: Number(directQuantity.value || 1),
+        address_id: Number(selectedAddressId.value),
+      })
+      ElMessage.success(res.message || '订单创建成功')
+      router.push('/orders')
+    } catch (error) {
+      ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '下单失败')
+    } finally {
+      submitLoading.value = false
+    }
     return
   }
 
@@ -228,19 +344,24 @@ async function handleSubmitOrders() {
   }
 }
 
+function goBack() {
+  router.push(isDirectMode.value ? '/products' : '/cart')
+}
+
 onMounted(refreshPageData)
+watch(() => route.fullPath, refreshPageData)
 </script>
 
 <template>
   <div class="checkout-page" v-loading="loading">
     <section class="page-block checkout-head">
       <div>
-        <h1 class="page-title">订单结算</h1>
-        <p class="page-subtitle">从购物车勾选项创建订单，并绑定收货地址快照。</p>
+        <h1 class="page-title">确认订单</h1>
+        <p class="page-subtitle">{{ pageSubtitle }}</p>
       </div>
       <div class="head-actions">
         <el-button @click="refreshPageData">刷新</el-button>
-        <el-button type="primary" @click="router.push('/cart')">返回购物车</el-button>
+        <el-button type="primary" @click="goBack">{{ backButtonText }}</el-button>
       </div>
     </section>
 
@@ -250,7 +371,7 @@ onMounted(refreshPageData)
         <el-button type="primary" plain @click="openCreateAddress">新增地址</el-button>
       </div>
 
-      <el-empty v-if="!hasAddresses" description="暂无地址，请先新增" />
+      <el-empty v-if="!hasAddresses" description="暂无地址，请新增后提交订单" />
 
       <div v-else class="address-list">
         <label v-for="item in addresses" :key="item.id" class="address-item">
@@ -272,17 +393,17 @@ onMounted(refreshPageData)
 
     <section class="page-block">
       <div class="card-title-row">
-        <strong>结算商品（来自购物车已勾选）</strong>
+        <strong>{{ goodsTitle }}</strong>
         <div class="summary">共 {{ selectedCount }} 项，合计 ¥{{ formatPrice(totalAmount) }}</div>
       </div>
 
-      <el-empty v-if="!hasSelectedItems" description="购物车暂无勾选商品，请先去购物车勾选" />
+      <el-empty v-if="!hasSelectedItems" :description="goodsEmptyDescription" />
 
       <el-table v-else :data="selectedItems" border stripe>
         <el-table-column label="商品" min-width="240">
           <template #default="scope">
             <div class="product-cell">
-              <img :src="scope.row.product.image_urls?.[0]" class="thumb" alt="商品" />
+              <img :src="productCover(scope.row.product)" class="thumb" alt="商品" @error="resolveImage" />
               <div>{{ scope.row.product.name }}</div>
             </div>
           </template>
@@ -290,15 +411,25 @@ onMounted(refreshPageData)
         <el-table-column label="单价" width="120">
           <template #default="scope">¥{{ formatPrice(scope.row.product.price) }}</template>
         </el-table-column>
-        <el-table-column prop="quantity" label="数量" width="100" />
+        <el-table-column label="数量" width="180">
+          <template #default="scope">
+            <el-input-number
+              v-if="isDirectMode"
+              v-model="directQuantity"
+              :min="1"
+              :max="Math.max(scope.row.product.stock || 1, 1)"
+            />
+            <span v-else>{{ scope.row.quantity }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="小计" width="120">
           <template #default="scope">¥{{ formatPrice(Number(scope.row.product.price) * Number(scope.row.quantity)) }}</template>
         </el-table-column>
       </el-table>
 
       <div class="submit-row">
-        <el-button type="danger" :loading="submitLoading" :disabled="!hasSelectedItems || !selectedAddressId" @click="handleSubmitOrders">
-          提交结算
+        <el-button type="danger" :loading="submitLoading" :disabled="!canSubmit" @click="handleSubmitOrders">
+          提交订单
         </el-button>
       </div>
     </section>

@@ -24,12 +24,16 @@ async def put_profile(db: AsyncSession, current_user: User, payload: SellerProfi
     return await upsert_seller_profile(db, current_user.id, payload)
 
 
-async def create_my_product(db: AsyncSession, current_user: User, payload: SellerProductCreate):
+async def ensure_product_publishing_allowed(db: AsyncSession, current_user: User) -> None:
     _ensure_seller(current_user)
     profile = await get_seller_profile_by_user_id(db, current_user.id)
     ensure(profile is not None, "SELLER_PROFILE_REQUIRED", "请先完善店铺资料并通过审核", 400)
     ensure(profile.audit_status == SellerAuditStatus.approved, "SELLER_PROFILE_NOT_APPROVED", "店铺资料未通过审核，暂不可上架", 403)
     ensure(profile.is_active, "SELLER_PROFILE_INACTIVE", "店铺已停用，暂不可上架", 403)
+
+
+async def create_my_product(db: AsyncSession, current_user: User, payload: SellerProductCreate):
+    await ensure_product_publishing_allowed(db, current_user)
     try:
         return await product_crud.create_product(db, payload, seller_id=current_user.id)
     except ValueError as exc:

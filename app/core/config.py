@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     mcp_server_host: str = "0.0.0.0"
     mcp_server_port: int = 9000
 
+    support_react_enabled: bool = True
+    support_react_max_steps: int = 4
+    support_react_tool_cache_seconds: int = 60
+    support_react_trigger_confidence: float = 0.65
+    support_react_allowed_tools: str = (
+        "get_order_details,get_product_snapshot,search_products,query_policy_kb,"
+        "create_support_ticket,escalate_ticket_to_admin"
+    )
+
     support_chroma_persist_dir: str = "./data/chroma"
     support_chroma_collection: str = "support_kb_chunks"
     support_retrieval_top_k: int = 5

@@ -11,6 +11,22 @@ const form = reactive({
 })
 const profileInfo = ref(null)
 
+function auditStatusLabel(status) {
+  const map = {
+    pending: '待审核',
+    approved: '已通过',
+    rejected: '已驳回',
+  }
+  return map[status] || status || '未提交'
+}
+
+function auditStatusType(status) {
+  if (status === 'approved') return 'success'
+  if (status === 'rejected') return 'error'
+  if (status === 'pending') return 'warning'
+  return 'info'
+}
+
 async function loadProfile() {
   loading.value = true
   try {
@@ -59,8 +75,8 @@ onMounted(loadProfile)
 
       <el-alert
         v-if="profileInfo"
-        :title="`审核状态：${profileInfo.audit_status}`"
-        type="info"
+        :title="`审核状态：${auditStatusLabel(profileInfo.audit_status)}`"
+        :type="auditStatusType(profileInfo.audit_status)"
         show-icon
         :closable="false"
         class="mb-12"

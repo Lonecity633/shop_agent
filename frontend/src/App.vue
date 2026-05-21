@@ -83,6 +83,11 @@ function contactService() {
   if (!ensureLogin('/support/chat')) return
   router.push('/support/chat')
 }
+
+function goSupportTickets() {
+  if (!ensureLogin('/support/tickets')) return
+  router.push('/support/tickets')
+}
 </script>
 
 <template>
@@ -94,6 +99,7 @@ function contactService() {
         <template v-if="isAdmin">
           <nav class="left-nav">
             <button class="nav-btn" @click="router.push('/admin/dashboard')">管理后台</button>
+            <button class="nav-btn" @click="router.push('/admin/support-tickets')">人工工单</button>
             <button class="nav-btn" @click="router.push('/orders')">订单监控</button>
           </nav>
           <nav class="right-nav">
@@ -109,6 +115,7 @@ function contactService() {
             <button class="nav-btn" @click="router.push('/orders')">订单列表</button>
             <button class="nav-btn" @click="goRefunds">退款工单</button>
             <button class="nav-btn" @click="contactService">客服</button>
+            <button class="nav-btn" @click="goSupportTickets">人工工单</button>
           </nav>
           <nav class="right-nav">
             <button class="nav-btn" @click="goProfile">{{ displayName }}</button>
@@ -122,6 +129,7 @@ function contactService() {
             <button class="nav-btn" @click="goFavorites">我的收藏</button>
             <button class="nav-btn" @click="goOrders">我的订单</button>
             <button class="nav-btn" @click="goRefunds">退款中心</button>
+            <button class="nav-btn" @click="goSupportTickets">人工工单</button>
           </nav>
 
           <nav class="right-nav">

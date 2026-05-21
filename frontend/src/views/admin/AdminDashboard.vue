@@ -110,6 +110,8 @@ const FALLBACK_IMAGE =
   encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#fff0ec" offset="0"/><stop stop-color="#ffe2cb" offset="1"/></linearGradient></defs><rect fill="url(#g)" width="160" height="120" rx="12"/><text x="50%" y="47%" dominant-baseline="middle" text-anchor="middle" font-size="14" fill="#c14a33" font-family="Arial">商品图</text><text x="50%" y="60%" dominant-baseline="middle" text-anchor="middle" font-size="11" fill="#9d5e49" font-family="Arial">未提供</text></svg>'
   )
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1'
+const BACKEND_ORIGIN = API_BASE.replace(/\/api\/v1\/?$/, '')
 
 const overviewCards = computed(() => [
   { label: '总用户数', value: overview.total_users, desc: `买家 ${overview.total_buyers} · 卖家 ${overview.total_sellers}` },
@@ -181,16 +183,23 @@ function refundStatusLabel(status) {
 }
 
 function normalizeImageUrls(value) {
-  if (Array.isArray(value)) return value.filter(Boolean)
+  if (Array.isArray(value)) return value.map((url) => resolveProductImageUrl(url)).filter(Boolean)
   if (typeof value === 'string') {
     try {
       const parsed = JSON.parse(value)
-      return Array.isArray(parsed) ? parsed.filter(Boolean) : []
+      return Array.isArray(parsed) ? parsed.map((url) => resolveProductImageUrl(url)).filter(Boolean) : []
     } catch {
       return []
     }
   }
   return []
+}
+
+function resolveProductImageUrl(rawUrl) {
+  const input = String(rawUrl || '').trim()
+  if (!input) return ''
+  if (input.startsWith('/uploads/')) return BACKEND_ORIGIN + input
+  return input
 }
 
 function toPendingProductViewModel(item) {
@@ -505,6 +514,7 @@ onMounted(refreshAll)
         :closable="false"
       />
       <el-button @click="router.push('/admin/knowledge')">知识库管理</el-button>
+      <el-button @click="router.push('/admin/support-tickets')">人工工单池</el-button>
       <el-button type="primary" @click="refreshAll">全量刷新</el-button>
     </section>
 

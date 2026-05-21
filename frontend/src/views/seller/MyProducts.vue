@@ -1,12 +1,20 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { createMyProduct, deleteMyProduct, getMyProducts, updateMyProduct, uploadProductImage } from '@/api/seller'
+import {
+  createMyProduct,
+  deleteMyProduct,
+  getMyProducts,
+  getSellerProfile,
+  updateMyProduct,
+  uploadProductImage,
+} from '@/api/seller'
 import { getCategories } from '@/api/category'
 
 const loading = ref(false)
 const submitLoading = ref(false)
 const products = ref([])
+const sellerProfile = ref(null)
 const categories = ref([])
 const categoriesLoading = ref(false)
 const dialogVisible = ref(false)
@@ -38,6 +46,12 @@ const form = reactive({
 
 const imageUploading = ref(false)
 
+const PROFILE_ERROR_MESSAGES = {
+  SELLER_PROFILE_REQUIRED: '请先完善店铺资料并提交审核，审核通过后才能发布商品',
+  SELLER_PROFILE_NOT_APPROVED: '店铺资料待审核，审核通过后才能发布商品',
+  SELLER_PROFILE_INACTIVE: '店铺已停用，暂不可发布商品',
+}
+
 function statusType(status) {
   if (status === 'approved') return 'success'
   if (status === 'rejected') return 'danger'
@@ -51,6 +65,47 @@ function statusLabel(status) {
     rejected: '已驳回',
   }
   return map[status] || status
+}
+
+function shopAuditStatusLabel(status) {
+  const map = {
+    pending: '待审核',
+    approved: '已通过',
+    rejected: '已驳回',
+  }
+  return map[status] || status || '未提交'
+}
+
+function getApiErrorCode(error) {
+  const data = error?.response?.data
+  if (data?.detail && typeof data.detail === 'object') return data.detail.code
+  return data?.code
+}
+
+function getApiErrorMessage(error, fallback) {
+  const code = getApiErrorCode(error)
+  if (PROFILE_ERROR_MESSAGES[code]) return PROFILE_ERROR_MESSAGES[code]
+  const data = error?.response?.data
+  if (data?.detail && typeof data.detail === 'object') return data.detail.message || fallback
+  return data?.message || data?.detail || fallback
+}
+
+function getSellerProfileBlockMessage() {
+  if (!sellerProfile.value) return PROFILE_ERROR_MESSAGES.SELLER_PROFILE_REQUIRED
+  if (!sellerProfile.value.is_active) return PROFILE_ERROR_MESSAGES.SELLER_PROFILE_INACTIVE
+  if (sellerProfile.value.audit_status === 'pending') return '店铺资料待审核，审核通过后才能发布商品'
+  if (sellerProfile.value.audit_status === 'rejected') return '店铺资料未通过审核，请修改店铺资料后重新提交审核'
+  if (sellerProfile.value.audit_status !== 'approved') {
+    return `店铺资料当前状态为${shopAuditStatusLabel(sellerProfile.value.audit_status)}，审核通过后才能发布商品`
+  }
+  return ''
+}
+
+function ensureSellerCanPublish() {
+  const message = getSellerProfileBlockMessage()
+  if (!message) return true
+  ElMessage.warning(message)
+  return false
 }
 
 function resetForm() {
@@ -79,6 +134,7 @@ function resolveImage(event) {
 }
 
 async function handleImageUpload(uploadFile) {
+  if (!ensureSellerCanPublish()) return
   if (form.image_urls.length >= 5) {
     ElMessage.warning('最多上传 5 张商品图')
     return
@@ -100,7 +156,7 @@ async function handleImageUpload(uploadFile) {
     form.image_urls.push(res.data.url)
     ElMessage.success('图片上传成功')
   } catch (error) {
-    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '上传失败')
+    ElMessage.error(getApiErrorMessage(error, '上传失败'))
   } finally {
     imageUploading.value = false
   }
@@ -116,9 +172,19 @@ async function loadProducts() {
     const res = await getMyProducts()
     products.value = normalizeProducts(res.data)
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '加载商品失败')
+    ElMessage.error(getApiErrorMessage(error, '加载商品失败'))
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSellerProfile() {
+  try {
+    const res = await getSellerProfile()
+    sellerProfile.value = res.data
+  } catch (error) {
+    sellerProfile.value = null
+    ElMessage.error(getApiErrorMessage(error, '加载店铺资料失败'))
   }
 }
 
@@ -129,13 +195,14 @@ async function loadCategories() {
     categories.value = res.data || []
   } catch (error) {
     categories.value = []
-    ElMessage.error(error?.response?.data?.detail || '加载分类失败')
+    ElMessage.error(getApiErrorMessage(error, '加载分类失败'))
   } finally {
     categoriesLoading.value = false
   }
 }
 
 function openCreate() {
+  if (!ensureSellerCanPublish()) return
   resetForm()
   dialogVisible.value = true
 }
@@ -152,6 +219,7 @@ function openEdit(row) {
 }
 
 async function submitForm() {
+  if (!ensureSellerCanPublish()) return
   if (!form.name.trim()) {
     ElMessage.warning('商品名称不能为空')
     return
@@ -191,7 +259,7 @@ async function submitForm() {
     dialogVisible.value = false
     await loadProducts()
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '提交失败')
+    ElMessage.error(getApiErrorMessage(error, '提交失败'))
   } finally {
     submitLoading.value = false
   }
@@ -203,12 +271,16 @@ async function handleDelete(row) {
     ElMessage.success('删除成功')
     await loadProducts()
   } catch (error) {
-    ElMessage.error(error?.response?.data?.detail || '删除失败')
+    ElMessage.error(getApiErrorMessage(error, '删除失败'))
   }
 }
 
+async function refreshPage() {
+  await Promise.all([loadSellerProfile(), loadProducts()])
+}
+
 onMounted(async () => {
-  await Promise.all([loadProducts(), loadCategories()])
+  await Promise.all([loadSellerProfile(), loadProducts(), loadCategories()])
 })
 </script>
 
@@ -221,7 +293,7 @@ onMounted(async () => {
       </div>
       <div class="head-actions">
         <el-button type="primary" @click="openCreate">新增商品</el-button>
-        <el-button @click="loadProducts">刷新</el-button>
+        <el-button @click="refreshPage">刷新</el-button>
       </div>
     </section>
 

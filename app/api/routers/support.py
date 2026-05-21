@@ -18,7 +18,9 @@ from app.schemas.support import (
     SupportSessionOut,
     SupportTimelineOut,
 )
+from app.schemas.support_ticket import SupportTicketCreate, SupportTicketOut
 from app.services import support as support_service
+from app.services import support_ticket as ticket_service
 from app.services.common import ServiceError
 
 router = APIRouter(prefix="/support", tags=["Support"])
@@ -131,3 +133,41 @@ async def auto_reply(
     except ServiceError as exc:
         _handle_error(exc)
     return {"code": "OK", "message": "智能客服回复成功", "data": data}
+
+
+@router.post("/tickets", response_model=APIResponse[SupportTicketOut])
+async def create_support_ticket(
+    payload: SupportTicketCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await ticket_service.create_ticket(db, current_user, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "人工客服工单创建成功", "data": data}
+
+
+@router.get("/me/tickets", response_model=APIResponse[list[SupportTicketOut]])
+async def list_my_support_tickets(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await ticket_service.list_my_tickets(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "我的人工工单获取成功", "data": data}
+
+
+@router.get("/tickets/{ticket_id}", response_model=APIResponse[SupportTicketOut])
+async def get_support_ticket(
+    ticket_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await ticket_service.get_ticket(db, current_user, ticket_id)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "人工工单详情获取成功", "data": data}

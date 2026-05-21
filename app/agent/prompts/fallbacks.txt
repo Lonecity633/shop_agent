@@ -25,6 +25,15 @@
 [chitchat_fallback]
 你好，请提供订单号或商品信息，我来继续协助你。
 
+[react_timeout]
+当前智能客服处理较慢，请稍后再试，或补充更明确的订单号/商品信息。
+
+[react_fallback]
+当前暂时无法完成多步骤查询，请补充订单号、商品名称或具体政策问题，我来继续协助你。
+
+[react_max_steps]
+目前已获取的信息还不足以完整回答，请补充更明确的订单号、商品名称或你关心的具体规则点。
+
 [order_fallback_template]
 订单 {order_id} 当前状态 {order_status}，支付状态 {pay_status}{payment_text}{refund_text}，物流单号 {tracking_no}（{logistics_company}）。
 

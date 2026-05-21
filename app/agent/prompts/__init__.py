@@ -39,6 +39,7 @@ CLASSIFIER = _load("classifier.txt")
 PRODUCT_INQUIRY = _load("product_inquiry.txt")
 POLICY = _load("policy.txt")
 ORDER_QUERY = _load("order_query.txt")
+REACT_AGENT = _load("react_agent.txt")
 
 # Guardrail config
 SENSITIVE_PATTERNS = _load_lines("sensitive_patterns.txt")

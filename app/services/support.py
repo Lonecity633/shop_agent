@@ -89,6 +89,7 @@ async def auto_reply(
             "route": result.route,
             "resolved_seller_id": result.resolved_seller_id,
             "evidences": result.evidences,
+            "support_ticket": result.support_ticket,
         }
     except RateLimitBackendUnavailable as exc:
         raise ServiceError("SUPPORT_RATE_LIMIT_UNAVAILABLE", "客服限流服务暂不可用，请稍后再试", 503) from exc

@@ -16,7 +16,9 @@ from app.schemas.seller import (
     SellerProfileOut,
     SellerProfileUpsert,
 )
+from app.schemas.support_ticket import SupportTicketEscalate, SupportTicketOut, SupportTicketResolve
 from app.services import seller as seller_service
+from app.services import support_ticket as ticket_service
 from app.services.common import ServiceError
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "uploads" / "products"
@@ -33,10 +35,13 @@ def _handle_error(exc: ServiceError):
 @router.post("/upload/image", summary="上传商品图片")
 async def upload_product_image(
     file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role.value != "seller":
-        raise_error("ROLE_DENIED", "仅卖家可上传商品图片", status_code=403)
+    try:
+        await seller_service.ensure_product_publishing_allowed(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
 
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -129,3 +134,51 @@ async def delete_my_product(
     except ServiceError as exc:
         _handle_error(exc)
     return {"message": "商品删除成功", "data": {"product_id": product_id}}
+
+
+@router.get("/support-tickets", response_model=APIResponse[list[SupportTicketOut]], summary="商家查看分配的人工工单")
+async def list_seller_support_tickets(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await ticket_service.list_seller_tickets(db, current_user)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "商家人工工单获取成功", "data": data}
+
+
+@router.patch(
+    "/support-tickets/{ticket_id}/resolve",
+    response_model=APIResponse[SupportTicketOut],
+    summary="商家解决人工工单",
+)
+async def resolve_seller_support_ticket(
+    ticket_id: int,
+    payload: SupportTicketResolve,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await ticket_service.seller_resolve_ticket(db, current_user, ticket_id, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "人工工单已解决", "data": data}
+
+
+@router.patch(
+    "/support-tickets/{ticket_id}/escalate",
+    response_model=APIResponse[SupportTicketOut],
+    summary="商家升级人工工单给管理员",
+)
+async def escalate_seller_support_ticket(
+    ticket_id: int,
+    payload: SupportTicketEscalate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await ticket_service.seller_escalate_ticket(db, current_user, ticket_id, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "人工工单已升级给管理员", "data": data}

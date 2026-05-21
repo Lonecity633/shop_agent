@@ -31,3 +31,15 @@ export function uploadProductImage(file) {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
+
+export function getSellerSupportTickets() {
+  return request.get('/seller/support-tickets')
+}
+
+export function resolveSellerSupportTicket(ticketId, payload) {
+  return request.patch(`/seller/support-tickets/${ticketId}/resolve`, payload)
+}
+
+export function escalateSellerSupportTicket(ticketId, payload) {
+  return request.patch(`/seller/support-tickets/${ticketId}/escalate`, payload)
+}

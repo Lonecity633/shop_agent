@@ -54,6 +54,12 @@ def parse_json_object(raw: str) -> dict[str, Any]:
 
 
 def parse_intent_output(raw: str) -> str | None:
+    payload = parse_intent_classification(raw)
+    intent = str(payload.get("intent", "")).strip()
+    return intent or None
+
+
+def parse_intent_classification(raw: str) -> dict[str, Any]:
     text = raw.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
@@ -62,15 +68,14 @@ def parse_intent_output(raw: str) -> str | None:
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", text, flags=re.DOTALL)
         if not match:
-            return None
+            return {}
         try:
             payload = json.loads(match.group(0))
         except json.JSONDecodeError:
-            return None
+            return {}
     if not isinstance(payload, dict):
-        return None
-    intent = str(payload.get("intent", "")).strip()
-    return intent or None
+        return {}
+    return payload
 
 
 def fallback_order_answer(tool_result: dict[str, Any]) -> str:

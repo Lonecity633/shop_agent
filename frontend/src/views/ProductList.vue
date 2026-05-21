@@ -1,9 +1,7 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getAddresses } from '@/api/address'
-import { createOrder } from '@/api/order'
 import { addCartItem } from '@/api/cart'
 import { getCategories } from '@/api/category'
 import { addFavorite, getFavorites, removeFavorite } from '@/api/favorite'
@@ -19,12 +17,6 @@ const categories = ref([])
 const activeCategory = ref('all')
 const keyword = ref('')
 
-const creatingOrderId = ref(null)
-const orderDialogVisible = ref(false)
-const selectedProduct = ref(null)
-const orderForm = reactive({ quantity: 1 })
-const addresses = ref([])
-const selectedAddressId = ref(null)
 let stockRefreshTimer = null
 
 const favoriteProductIds = ref(new Set())
@@ -34,12 +26,15 @@ const FALLBACK_IMAGE =
   encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#fff0ec" offset="0"/><stop stop-color="#ffe2cb" offset="1"/></linearGradient></defs><rect fill="url(#g)" width="640" height="640" rx="28"/><text x="50%" y="49%" dominant-baseline="middle" text-anchor="middle" font-size="42" fill="#c14a33" font-family="Arial">京选商城</text><text x="50%" y="59%" dominant-baseline="middle" text-anchor="middle" font-size="24" fill="#9d5e49" font-family="Arial">暂无商品图</text></svg>'
   )
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1'
+const BACKEND_ORIGIN = API_BASE.replace(/\/api\/v1\/?$/, '')
 
 const hasProducts = computed(() => products.value.length > 0)
 
 function normalizeImageUrl(rawUrl) {
   const input = String(rawUrl || '').trim()
   if (!input) return ''
+  if (input.startsWith('/uploads/')) return BACKEND_ORIGIN + input
   try {
     const parsed = new URL(input)
     const candidate = parsed.searchParams.get('mediaurl') || parsed.searchParams.get('murl')
@@ -142,25 +137,6 @@ async function fetchFavorites() {
   }
 }
 
-async function fetchAddressesForOrder() {
-  if (!authStore.isLoggedIn) {
-    addresses.value = []
-    selectedAddressId.value = null
-    return
-  }
-  try {
-    const res = await getAddresses()
-    const list = res.data || []
-    addresses.value = list
-    const defaultAddress = list.find((item) => item.is_default)
-    selectedAddressId.value = (defaultAddress || list[0])?.id || null
-  } catch (error) {
-    addresses.value = []
-    selectedAddressId.value = null
-    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '加载地址失败')
-  }
-}
-
 function isFavorited(productId) {
   return favoriteProductIds.value.has(Number(productId))
 }
@@ -209,41 +185,20 @@ function handleReset() {
   fetchProducts()
 }
 
-async function openOrderDialog(product) {
+function buyNow(product) {
   if (!ensureLoginForAction()) return
-  await fetchAddressesForOrder()
-  if (!addresses.value.length) {
-    ElMessage.warning('请先在地址管理中创建收货地址后再下单')
+  if (product.stock <= 0) {
+    ElMessage.warning('商品暂时无货')
     return
   }
-  selectedProduct.value = product
-  orderForm.quantity = 1
-  orderDialogVisible.value = true
-}
-
-async function handleCreateOrder() {
-  if (!selectedProduct.value) return
-  if (!selectedAddressId.value) {
-    ElMessage.warning('请选择收货地址')
-    return
-  }
-  const product = selectedProduct.value
-  creatingOrderId.value = product.id
-  try {
-    const res = await createOrder({
+  router.push({
+    path: '/checkout',
+    query: {
+      mode: 'direct',
       product_id: product.id,
-      quantity: orderForm.quantity,
-      address_id: Number(selectedAddressId.value),
-    })
-    ElMessage.success(res.message || '下单成功')
-    orderDialogVisible.value = false
-    selectedProduct.value = null
-    await fetchProducts()
-  } catch (error) {
-    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '下单失败')
-  } finally {
-    creatingOrderId.value = null
-  }
+      quantity: 1,
+    },
+  })
 }
 
 async function refreshStorefrontOnVisible() {
@@ -353,7 +308,7 @@ onUnmounted(() => {
               type="primary"
               class="buy-btn"
               :disabled="product.stock <= 0"
-              @click="openOrderDialog(product)"
+              @click="buyNow(product)"
             >
               立即下单
             </el-button>
@@ -367,45 +322,6 @@ onUnmounted(() => {
     </section>
 
     <el-empty v-if="!loading && !hasProducts" description="没有找到符合条件的商品" class="page-block" />
-
-    <el-dialog v-model="orderDialogVisible" title="确认下单" width="520px">
-      <div v-if="selectedProduct" class="confirm-panel">
-        <img :src="selectedProduct.cover" class="confirm-image" alt="商品图" @error="resolveImage" />
-        <div class="confirm-main">
-          <h3>{{ selectedProduct.name }}</h3>
-          <p>{{ selectedProduct.description || '暂无描述' }}</p>
-          <div class="confirm-line">
-            <span>单价</span>
-            <strong>¥{{ formatPrice(selectedProduct.price) }}</strong>
-          </div>
-          <div class="confirm-line">
-            <span>数量</span>
-            <el-input-number v-model="orderForm.quantity" :min="1" :max="Math.max(selectedProduct.stock || 1, 1)" />
-          </div>
-          <div class="confirm-line">
-            <span>收货地址</span>
-            <el-select v-model="selectedAddressId" placeholder="请选择收货地址" style="width: 260px">
-              <el-option
-                v-for="addr in addresses"
-                :key="addr.id"
-                :label="`${addr.receiver_name} ${addr.receiver_phone} ${addr.province}${addr.city}${addr.district || ''}${addr.detail_address}`"
-                :value="addr.id"
-              />
-            </el-select>
-          </div>
-          <div class="confirm-line total">
-            <span>应付金额</span>
-            <strong>¥{{ formatPrice(Number(selectedProduct.price) * orderForm.quantity) }}</strong>
-          </div>
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="orderDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="creatingOrderId === selectedProduct?.id" @click="handleCreateOrder">
-          确认下单
-        </el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -528,48 +444,4 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 
-.confirm-panel {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: 14px;
-}
-
-.confirm-image {
-  width: 140px;
-  height: 140px;
-  object-fit: cover;
-  border-radius: 8px;
-}
-
-.confirm-main {
-  display: grid;
-  gap: 10px;
-}
-
-.confirm-main h3,
-.confirm-main p {
-  margin: 0;
-}
-
-.confirm-line {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.confirm-line.total {
-  color: #d5391c;
-  font-weight: 700;
-}
-
-@media (max-width: 760px) {
-  .confirm-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .confirm-image {
-    width: 100%;
-    height: 180px;
-  }
-}
 </style>

@@ -22,8 +22,10 @@ from app.schemas.category import CategoryCreate, CategoryOut, CategoryStatusUpda
 from app.schemas.common import APIResponse, PagedData
 from app.schemas.knowledge import KBDocumentCreate, KBDocumentOut
 from app.schemas.refund import RefundAdminReview, RefundExecutePayload, RefundOut
+from app.schemas.support_ticket import SupportTicketClose, SupportTicketOut, SupportTicketReject, SupportTicketResolve
 from app.services import admin as admin_service
 from app.services import knowledge as kb_service
+from app.services import support_ticket as ticket_service
 from app.services.common import ServiceError
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -31,6 +33,83 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 
 def _handle_error(exc: ServiceError):
     raise_error(exc.code, exc.message, status_code=exc.status_code)
+
+
+@router.get("/support-tickets", response_model=APIResponse[list[SupportTicketOut]], summary="管理员查看人工客服工单池")
+async def list_admin_support_tickets(
+    status: str | None = Query(default=None),
+    assigned_role: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    keyword: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await ticket_service.list_admin_tickets(
+            db,
+            current_user,
+            status=status,
+            assigned_role=assigned_role,
+            category=category,
+            keyword=keyword,
+        )
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "人工客服工单池获取成功", "data": data}
+
+
+@router.patch(
+    "/support-tickets/{ticket_id}/resolve",
+    response_model=APIResponse[SupportTicketOut],
+    summary="管理员解决人工工单",
+)
+async def resolve_admin_support_ticket(
+    ticket_id: int,
+    payload: SupportTicketResolve,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await ticket_service.admin_resolve_ticket(db, current_user, ticket_id, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "人工工单已解决", "data": data}
+
+
+@router.patch(
+    "/support-tickets/{ticket_id}/reject",
+    response_model=APIResponse[SupportTicketOut],
+    summary="管理员取消无效人工工单",
+)
+async def reject_admin_support_ticket(
+    ticket_id: int,
+    payload: SupportTicketReject,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await ticket_service.admin_reject_ticket(db, current_user, ticket_id, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "人工工单已取消", "data": data}
+
+
+@router.patch(
+    "/support-tickets/{ticket_id}/close",
+    response_model=APIResponse[SupportTicketOut],
+    summary="管理员关闭人工工单",
+)
+async def close_admin_support_ticket(
+    ticket_id: int,
+    payload: SupportTicketClose,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        data = await ticket_service.admin_close_ticket(db, current_user, ticket_id, payload)
+    except ServiceError as exc:
+        _handle_error(exc)
+    return {"code": "OK", "message": "人工工单已关闭", "data": data}
 
 
 @router.get("/categories", response_model=APIResponse[list[CategoryOut]], summary="管理员查看分类列表")

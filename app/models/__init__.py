@@ -9,7 +9,7 @@ from app.models.payment import PaymentTransaction
 from app.models.product import Product
 from app.models.refund import RefundTicket
 from app.models.seller_profile import SellerProfile
-from app.models.support import SupportMessage, SupportSession
+from app.models.support import SupportMessage, SupportSession, SupportTicket
 from app.models.user import User
 
 __all__ = [
@@ -28,4 +28,5 @@ __all__ = [
     "RefundTicket",
     "SupportSession",
     "SupportMessage",
+    "SupportTicket",
 ]

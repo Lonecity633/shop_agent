@@ -8,8 +8,10 @@ import ForbiddenView from '@/views/ForbiddenView.vue'
 import FavoritesView from '@/views/FavoritesView.vue'
 import CartView from '@/views/CartView.vue'
 import SupportChatView from '@/views/SupportChatView.vue'
+import SupportTicketsView from '@/views/SupportTicketsView.vue'
 import AdminDashboard from '@/views/admin/AdminDashboard.vue'
 import KnowledgeManagement from '@/views/admin/KnowledgeManagement.vue'
+import AdminSupportTickets from '@/views/admin/AdminSupportTickets.vue'
 import SellerCenter from '@/views/seller/SellerCenter.vue'
 import MyProducts from '@/views/seller/MyProducts.vue'
 import LoginView from '@/views/auth/LoginView.vue'
@@ -24,9 +26,11 @@ const routes = [
   { path: '/checkout', name: 'checkout', component: CheckoutView, meta: { requiresAuth: true, disallowAdmin: true, disallowSeller: true } },
   { path: '/refunds', name: 'refunds', component: RefundCenter, meta: { requiresAuth: true, disallowAdmin: true } },
   { path: '/support/chat', name: 'support-chat', component: SupportChatView, meta: { requiresAuth: true, disallowAdmin: true } },
+  { path: '/support/tickets', name: 'support-tickets', component: SupportTicketsView, meta: { requiresAuth: true, disallowAdmin: true } },
   { path: '/profile', name: 'profile', component: ProfileView, meta: { requiresAuth: true } },
   { path: '/admin/dashboard', name: 'admin-dashboard', component: AdminDashboard, meta: { requiresAuth: true, requiresAdmin: true } },
   { path: '/admin/knowledge', name: 'admin-knowledge', component: KnowledgeManagement, meta: { requiresAuth: true, requiresAdmin: true } },
+  { path: '/admin/support-tickets', name: 'admin-support-tickets', component: AdminSupportTickets, meta: { requiresAuth: true, requiresAdmin: true } },
   { path: '/seller/center', name: 'seller-center', component: SellerCenter, meta: { requiresAuth: true, requiresSeller: true } },
   { path: '/seller/products', name: 'seller-products', component: MyProducts, meta: { requiresAuth: true, requiresSeller: true } },
   { path: '/403', name: 'forbidden', component: ForbiddenView },

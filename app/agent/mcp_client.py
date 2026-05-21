@@ -6,6 +6,7 @@ from typing import Any
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.types import Tool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -20,6 +21,16 @@ class McpToolError(RuntimeError):
 class McpToolClient:
     def __init__(self, *, server_url: str | None = None):
         self.server_url = server_url or settings.mcp_server_url
+
+    async def list_tools(self) -> list[Tool]:
+        async with streamablehttp_client(
+            self.server_url,
+            timeout=settings.mcp_tool_timeout_seconds,
+        ) as (read_stream, write_stream, _):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.list_tools()
+        return list(result.tools)
 
     async def call_tool(
         self,

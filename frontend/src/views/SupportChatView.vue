@@ -1,16 +1,19 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
 
-import { autoReply, createMySupportSession, getMyLatestSupportSession, getSupportMessages } from '@/api/support'
+import { autoReply, createMySupportSession, createSupportTicket, getMyLatestSupportSession, getSupportMessages } from '@/api/support'
 import { useAuthStore } from '@/stores/auth'
 
+const router = useRouter()
 const authStore = useAuthStore()
 const role = computed(() => authStore.user?.role || '')
 const userId = computed(() => authStore.user?.id || '')
 
 const loading = ref(false)
 const sending = ref(false)
+const handoffLoading = ref(false)
 const messages = ref([])
 const input = ref('')
 const sessionId = ref(null)
@@ -78,6 +81,10 @@ function scrollToBottom() {
   chatBody.value.scrollTop = chatBody.value.scrollHeight
 }
 
+function ticketRoleLabel(ticket) {
+  return ticket?.assigned_role === 'seller' ? '卖家' : '管理员'
+}
+
 async function sendMessage() {
   const content = input.value.trim()
   if (!content || sending.value) return
@@ -110,6 +117,9 @@ async function sendMessage() {
       content: res.data?.answer || '暂无回复',
       created_at: new Date().toISOString(),
     })
+    if (res.data?.support_ticket?.ticket_id) {
+      ElMessage.success(`已创建人工工单 #${res.data.support_ticket.ticket_id}，处理方：${ticketRoleLabel(res.data.support_ticket)}`)
+    }
     await nextTick()
     scrollToBottom()
     await loadMessages()
@@ -117,6 +127,40 @@ async function sendMessage() {
     ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '发送失败')
   } finally {
     sending.value = false
+  }
+}
+
+async function createManualTicket() {
+  if (handoffLoading.value) return
+  handoffLoading.value = true
+  try {
+    const sid = await ensureSession()
+    const ticketContent = input.value.trim() || '用户在智能客服中主动请求转人工处理。'
+    const res = await createSupportTicket({
+      source_session_id: sid,
+      category: 'other',
+      priority: 'normal',
+      source: 'user',
+      title: ticketContent.slice(0, 60) || '转人工客服',
+      content: ticketContent,
+      trigger_reason: 'user_manual_handoff',
+      guardrail_flags: [],
+    })
+    const ticket = res.data
+    ElMessage.success(`已创建人工工单 #${ticket.id}，处理方：${ticketRoleLabel(ticket)}`)
+    messages.value.push({
+      id: `ticket-${ticket.id}`,
+      role: 'assistant',
+      content: `已为你创建人工客服工单 #${ticket.id}，当前处理方：${ticketRoleLabel(ticket)}。`,
+      created_at: new Date().toISOString(),
+    })
+    input.value = ''
+    await nextTick()
+    scrollToBottom()
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || error?.response?.data?.detail || '转人工失败')
+  } finally {
+    handoffLoading.value = false
   }
 }
 
@@ -153,6 +197,9 @@ onMounted(initChat)
         <h1 class="page-title">在线客服</h1>
         <p class="page-subtitle">可直接咨询订单、物流、发票、售后等问题。</p>
       </div>
+      <div class="head-actions">
+        <el-button @click="router.push('/support/tickets')">我的人工工单</el-button>
+      </div>
     </section>
 
     <section class="page-block support-chat" v-loading="loading">
@@ -177,6 +224,7 @@ onMounted(initChat)
           @keyup.ctrl.enter="sendMessage"
         />
         <div class="editor-actions">
+          <el-button :loading="handoffLoading" @click="createManualTicket">转人工</el-button>
           <el-button type="primary" :loading="sending" @click="sendMessage">发送</el-button>
         </div>
       </div>
@@ -192,6 +240,18 @@ onMounted(initChat)
 
 .support-chat {
   padding: 12px;
+}
+
+.support-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.head-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .chat-body {

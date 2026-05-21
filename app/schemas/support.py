@@ -90,3 +90,5 @@ class SupportAutoReplyOut(BaseModel):
     answer: str
     route: str
     resolved_seller_id: int | None
+    evidences: list[dict[str, Any]] = Field(default_factory=list)
+    support_ticket: dict[str, Any] | None = None

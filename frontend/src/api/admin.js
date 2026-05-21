@@ -92,3 +92,19 @@ export function uploadKbDocumentFile(title, file) {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
+
+export function getAdminSupportTickets(params = {}) {
+  return request.get('/admin/support-tickets', { params })
+}
+
+export function resolveAdminSupportTicket(ticketId, payload) {
+  return request.patch(`/admin/support-tickets/${ticketId}/resolve`, payload)
+}
+
+export function rejectAdminSupportTicket(ticketId, payload) {
+  return request.patch(`/admin/support-tickets/${ticketId}/reject`, payload)
+}
+
+export function closeAdminSupportTicket(ticketId, payload = {}) {
+  return request.patch(`/admin/support-tickets/${ticketId}/close`, payload)
+}

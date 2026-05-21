@@ -64,6 +64,8 @@ class PolicyHandler(IntentHandler):
                 arguments={"question": ctx.content, "top_k": settings.support_retrieval_top_k},
             )
             chunks = result.get("data") or []
+            if not chunks and settings.mcp_fallback_enabled:
+                return await retrieve(ctx.db, ctx.content, top_k=settings.support_retrieval_top_k), "local_fallback_empty_mcp"
             return (chunks if isinstance(chunks, list) else []), "mcp"
         except Exception:
             if not settings.mcp_fallback_enabled:
