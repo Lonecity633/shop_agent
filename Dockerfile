@@ -18,5 +18,5 @@ COPY ./app ./app
 EXPOSE 8000
 
 # 6. 启动命令
-# 注意：这里假设你的 FastAPI 实例在 app/main.py 里面，且变量名为 app
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 默认启动传统后端服务；agent 和 mcp_server 在 compose 中覆盖命令。
+CMD ["uvicorn", "app.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -100,13 +100,13 @@ async function sendMessage() {
     let sid = await ensureSession()
     let res
     try {
-      res = await autoReply(sid, { content })
+      res = await autoReply(sid, { content, user_id: Number(userId.value) })
     } catch (error) {
       if (error?.response?.status === 404) {
         localStorage.removeItem(sessionStorageKey())
         sessionId.value = null
         sid = await ensureSession()
-        res = await autoReply(sid, { content })
+        res = await autoReply(sid, { content, user_id: Number(userId.value) })
       } else {
         throw error
       }

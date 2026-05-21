@@ -19,6 +19,7 @@ import RegisterView from '@/views/auth/RegisterView.vue'
 
 const routes = [
   { path: '/', redirect: '/products' },
+  { path: '/support', redirect: '/support/chat' },
   { path: '/products', name: 'products', component: ProductList, meta: { disallowAdmin: true, disallowSeller: true } },
   { path: '/favorites', name: 'favorites', component: FavoritesView, meta: { requiresAuth: true, disallowAdmin: true, disallowSeller: true } },
   { path: '/cart', name: 'cart', component: CartView, meta: { requiresAuth: true, disallowAdmin: true, disallowSeller: true } },

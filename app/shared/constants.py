@@ -1,0 +1,3 @@
+INTERNAL_SECRET_HEADER = "X-Internal-Secret"
+DEFAULT_TOOL_LIMIT = 5
+

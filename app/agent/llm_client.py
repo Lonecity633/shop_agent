@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
-from app.core.config import settings
+from app.shared.config import settings
+from app.shared.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -51,13 +56,50 @@ class LLMClient:
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
         timeout = max(5, int(settings.llm_timeout_seconds))
+        started_at = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout, trust_env=settings.llm_trust_env) as client:
                 response = await client.post(url, headers=headers, json=payload)
+                duration_ms = int((time.perf_counter() - started_at) * 1000)
+                logger.info(
+                    "llm_chat_completion_completed base_url=%s model=%s status_code=%s duration_ms=%s messages_count=%s tools_count=%s",
+                    base_url,
+                    settings.llm_model,
+                    response.status_code,
+                    duration_ms,
+                    len(messages),
+                    len(tools or []),
+                )
                 response.raise_for_status()
                 data = response.json()
         except httpx.TimeoutException as exc:
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.exception(
+                "llm_chat_completion_timeout base_url=%s model=%s duration_ms=%s",
+                base_url,
+                settings.llm_model,
+                duration_ms,
+            )
             raise TimeoutError("LLM 请求超时") from exc
+        except httpx.HTTPStatusError as exc:
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.exception(
+                "llm_chat_completion_status_error base_url=%s model=%s status_code=%s duration_ms=%s",
+                base_url,
+                settings.llm_model,
+                exc.response.status_code,
+                duration_ms,
+            )
+            raise
+        except httpx.HTTPError:
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.exception(
+                "llm_chat_completion_failed base_url=%s model=%s duration_ms=%s",
+                base_url,
+                settings.llm_model,
+                duration_ms,
+            )
+            raise
 
         choices = data.get("choices") or []
         if not choices:

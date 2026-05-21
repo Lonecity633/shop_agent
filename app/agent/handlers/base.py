@@ -4,22 +4,20 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.agent.llm_client import LLMClient
-from app.models.user import User
 
 
 @dataclass
 class HandlerContext:
-    db: AsyncSession
-    current_user: User
+    user_id: int
+    user_role: str
     content: str
     history: list[dict]
-    session_id: int
-    order_id: int | None
+    session_id: str
+    order_id: str | None
     product_id: int | None
     llm_client: LLMClient
+    mcp_client: Any = None
 
 
 @dataclass

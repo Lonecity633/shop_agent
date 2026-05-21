@@ -1,0 +1,82 @@
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.backend.models.favorite import Favorite
+from app.backend.models.category import Category
+from app.backend.models.product import Product, ProductStatus
+
+
+async def list_favorites(db: AsyncSession, user_id: int) -> list[Favorite]:
+    result = await db.execute(
+        select(Favorite)
+        .options(selectinload(Favorite.product).selectinload(Product.category))
+        .where(
+            Favorite.user_id == user_id,
+            Favorite.product.has(Product.is_deleted.is_(False)),
+            Favorite.product.has(Product.category.has(Category.is_active.is_(True))),
+        )
+        .order_by(Favorite.id.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_favorite_by_user_product(db: AsyncSession, user_id: int, product_id: int) -> Favorite | None:
+    result = await db.execute(
+        select(Favorite).where(Favorite.user_id == user_id, Favorite.product_id == product_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def add_favorite(db: AsyncSession, user_id: int, product_id: int) -> Favorite:
+    existing = await get_favorite_by_user_product(db, user_id, product_id)
+    if existing is not None:
+        result = await db.execute(
+            select(Favorite)
+            .options(selectinload(Favorite.product).selectinload(Product.category))
+            .where(Favorite.id == existing.id)
+        )
+        return result.scalar_one()
+
+    product_result = await db.execute(
+        select(Product)
+        .options(selectinload(Product.category))
+        .where(Product.id == product_id)
+    )
+    product = product_result.scalar_one_or_none()
+    if product is None:
+        raise ValueError("商品不存在")
+    if product.is_deleted:
+        raise ValueError("商品已下架，无法收藏")
+    if product.approval_status != ProductStatus.approved:
+        raise ValueError("商品不可收藏")
+    if product.category is None or not product.category.is_active:
+        raise ValueError("商品所属分类已停用，暂不可收藏")
+
+    favorite = Favorite(user_id=user_id, product_id=product_id)
+    db.add(favorite)
+    await db.commit()
+
+    result = await db.execute(
+        select(Favorite)
+        .options(selectinload(Favorite.product).selectinload(Product.category))
+        .where(Favorite.id == favorite.id)
+    )
+    return result.scalar_one()
+
+
+async def remove_favorite(db: AsyncSession, user_id: int, product_id: int) -> bool:
+    favorite = await get_favorite_by_user_product(db, user_id, product_id)
+    if favorite is None:
+        return False
+    await db.delete(favorite)
+    await db.commit()
+    return True
+
+
+async def remove_favorites_by_product(db: AsyncSession, product_id: int) -> int:
+    result = await db.execute(select(Favorite).where(Favorite.product_id == product_id))
+    items = result.scalars().all()
+    for item in items:
+        await db.delete(item)
+    return len(items)
