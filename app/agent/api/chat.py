@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.agent.service import AgentService
 from app.shared.schemas.agent import AgentChatRequest, AgentChatResponse
@@ -19,6 +19,5 @@ async def chat(payload: AgentChatRequest) -> AgentChatResponse:
 
 
 @router.get("/sessions/{session_id}")
-async def get_session(session_id: str):
-    return {"session_id": session_id, "messages": await agent_service.context_manager.get_history(session_id)}
-
+async def get_session(session_id: str, user_id: int = Query(..., gt=0)):
+    return {"session_id": session_id, "user_id": user_id, "messages": await agent_service.context_manager.get_history(user_id, session_id)}

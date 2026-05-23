@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import time
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -14,27 +12,8 @@ from app.shared.logging import get_logger
 logger = get_logger(__name__)
 
 
-@dataclass
-class LLMToolCall:
-    id: str
-    name: str
-    arguments: str
-
-
-@dataclass
-class LLMChatResult:
-    content: str
-    tool_calls: list[LLMToolCall]
-
-
 class LLMClient:
-    async def chat_completion(
-        self,
-        *,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        tool_choice: str | dict[str, Any] | None = None,
-    ) -> LLMChatResult:
+    async def chat_completion(self, *, messages: list[dict[str, Any]]) -> str:
         if not settings.llm_api_key.strip():
             raise RuntimeError("LLM_API_KEY 未配置")
         if not messages:
@@ -51,10 +30,6 @@ class LLMClient:
             "temperature": settings.llm_temperature,
             "messages": messages,
         }
-        if tools:
-            payload["tools"] = tools
-        if tool_choice is not None:
-            payload["tool_choice"] = tool_choice
         timeout = max(5, int(settings.llm_timeout_seconds))
         started_at = time.perf_counter()
         try:
@@ -62,13 +37,12 @@ class LLMClient:
                 response = await client.post(url, headers=headers, json=payload)
                 duration_ms = int((time.perf_counter() - started_at) * 1000)
                 logger.info(
-                    "llm_chat_completion_completed base_url=%s model=%s status_code=%s duration_ms=%s messages_count=%s tools_count=%s",
+                    "llm_chat_completion_completed base_url=%s model=%s status_code=%s duration_ms=%s messages_count=%s",
                     base_url,
                     settings.llm_model,
                     response.status_code,
                     duration_ms,
                     len(messages),
-                    len(tools or []),
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -106,35 +80,12 @@ class LLMClient:
             raise RuntimeError("LLM 返回为空")
         message = choices[0].get("message") or {}
         text = self._extract_message_content(message.get("content"))
-
-        raw_tool_calls = message.get("tool_calls") or []
-        tool_calls: list[LLMToolCall] = []
-        if isinstance(raw_tool_calls, list):
-            for item in raw_tool_calls:
-                if not isinstance(item, dict):
-                    continue
-                fn = item.get("function") or {}
-                if not isinstance(fn, dict):
-                    continue
-                name = str(fn.get("name") or "").strip()
-                call_id = str(item.get("id") or "").strip()
-                arguments = fn.get("arguments")
-                if isinstance(arguments, dict):
-                    arguments = json.dumps(arguments, ensure_ascii=False)
-                if not isinstance(arguments, str):
-                    arguments = "{}"
-                if name and call_id:
-                    tool_calls.append(LLMToolCall(id=call_id, name=name, arguments=arguments))
-
-        if not text and not tool_calls:
+        if not text:
             raise RuntimeError("LLM 返回内容缺失")
-        return LLMChatResult(content=text, tool_calls=tool_calls)
+        return text
 
     async def chat_messages(self, *, messages: list[dict[str, str]]) -> str:
-        result = await self.chat_completion(messages=messages)
-        if result.content:
-            return result.content
-        raise RuntimeError("LLM 返回内容缺失")
+        return await self.chat_completion(messages=messages)
 
     async def chat(self, *, system_prompt: str, user_prompt: str) -> str:
         return await self.chat_messages(

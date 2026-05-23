@@ -5,7 +5,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Body, Depends, Header, Query
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,9 @@ from app.backend.models.order import Order
 from app.backend.models.payment import PaymentTransaction
 from app.backend.models.product import Product, ProductStatus
 from app.backend.models.refund import RefundTicket
+from app.backend.models.support import SupportTicket
+from app.backend.models.user import User
+from app.backend.repositories import support_ticket as ticket_crud
 from app.shared.config import settings
 from app.shared.constants import INTERNAL_SECRET_HEADER
 
@@ -256,6 +259,104 @@ async def get_refund_status(
     )
 
 
+@router.get("/payments/status")
+async def get_payment_status(
+    order_id: str | None = Query(default=None),
+    payment_no: str | None = Query(default=None),
+    user_id: int = Query(..., gt=0),
+    user_role: str = Query(default="buyer"),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_internal_secret),
+):
+    stmt = select(PaymentTransaction)
+    if payment_no:
+        stmt = stmt.where(PaymentTransaction.payment_no == payment_no.strip())
+    elif order_id:
+        resolved = await _resolve_order(db, user_id=user_id, user_role=user_role, order_id=order_id.strip())
+        if resolved is None:
+            return _tool_response([], success=False, error="ORDER_NOT_FOUND")
+        stmt = stmt.where(PaymentTransaction.order_id == resolved[0])
+    else:
+        return _tool_response([], success=False, error="PAYMENT_LOOKUP_REQUIRED")
+
+    if user_role == "buyer":
+        stmt = stmt.where(PaymentTransaction.buyer_id == user_id)
+    elif user_role == "seller":
+        stmt = stmt.join(Order, Order.id == PaymentTransaction.order_id).join(Product, Product.id == Order.product_id).where(
+            Product.seller_id == user_id
+        )
+    elif user_role != "admin":
+        stmt = stmt.where(PaymentTransaction.id == -1)
+
+    rows = (await db.execute(stmt.order_by(PaymentTransaction.id.desc()).limit(10))).scalars().all()
+    return _tool_response(
+        [
+            {
+                "payment_no": item.payment_no,
+                "order_pk": item.order_id,
+                "buyer_id": item.buyer_id,
+                "channel": item.channel,
+                "amount": item.amount,
+                "status": item.status.value,
+                "provider_trade_no": item.provider_trade_no,
+                "failure_reason": item.failure_reason,
+                "paid_at": item.paid_at,
+                "created_at": item.created_at,
+            }
+            for item in rows
+        ],
+        success=bool(rows),
+        error=None if rows else "PAYMENT_NOT_FOUND",
+    )
+
+
+@router.get("/users/{user_id}/support-tickets")
+async def list_support_tickets(
+    user_id: int,
+    user_role: str = Query(default="buyer"),
+    limit: int = Query(default=5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_internal_secret),
+):
+    if user_role != "buyer":
+        return _tool_response([], success=False, error="SUPPORT_TICKET_ROLE_UNSUPPORTED")
+    rows = (await db.execute(select(SupportTicket).where(SupportTicket.buyer_id == user_id).order_by(SupportTicket.id.desc()).limit(limit))).scalars().all()
+    return _tool_response([_ticket_snapshot(item) for item in rows])
+
+
+@router.post("/support-tickets")
+async def create_support_ticket(
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_internal_secret),
+):
+    user_id = int(payload.get("user_id") or 0)
+    user_role = str(payload.get("user_role") or "buyer")
+    if user_role != "buyer":
+        return _tool_response(None, success=False, error="SUPPORT_TICKET_ROLE_UNSUPPORTED")
+    actor = await db.get(User, user_id)
+    if actor is None:
+        return _tool_response(None, success=False, error="USER_NOT_FOUND")
+    ticket = await ticket_crud.create_ticket_from_tool(
+        db,
+        actor=actor,
+        source_session_id=_optional_int(payload.get("source_session_id")),
+        title=str(payload.get("title") or "人工客服工单"),
+        content=str(payload.get("content") or payload.get("title") or "需要人工处理"),
+        category=str(payload.get("category") or "other"),
+        priority=str(payload.get("priority") or "normal"),
+        source=str(payload.get("source") or "agent"),
+        order_id=str(payload.get("order_id")) if payload.get("order_id") not in (None, "") else None,
+        product_id=_optional_int(payload.get("product_id")),
+        refund_id=_optional_int(payload.get("refund_id")),
+        ai_summary=str(payload.get("ai_summary") or ""),
+        ai_trace_id=str(payload.get("ai_trace_id")) if payload.get("ai_trace_id") else None,
+        trigger_reason=str(payload.get("trigger_reason") or ""),
+        guardrail_flags=payload.get("guardrail_flags") if isinstance(payload.get("guardrail_flags"), list) else [],
+    )
+    return _tool_response(_ticket_snapshot(ticket))
+
+
 @router.get("/knowledge/policies/search")
 async def search_after_sale_policy(
     query: str = Query(..., min_length=1),
@@ -265,3 +366,26 @@ async def search_after_sale_policy(
 ):
     return _tool_response(await retrieve(db, query, top_k=top_k))
 
+
+def _ticket_snapshot(ticket: SupportTicket) -> dict:
+    return {
+        "ticket_id": ticket.id,
+        "status": ticket.status.value,
+        "category": ticket.category.value,
+        "priority": ticket.priority.value,
+        "assigned_role": ticket.assigned_role.value,
+        "order_id": ticket.order_id,
+        "product_id": ticket.product_id,
+        "refund_id": ticket.refund_id,
+        "title": ticket.title,
+        "trigger_reason": ticket.trigger_reason,
+        "created_at": ticket.created_at,
+        "updated_at": ticket.updated_at,
+    }
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

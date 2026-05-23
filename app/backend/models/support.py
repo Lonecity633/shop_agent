@@ -94,6 +94,98 @@ class SupportTicketAssignedRole(str, enum.Enum):
     admin = "admin"
 
 
+class SupportAgentMemory(Base):
+    __tablename__ = "support_agent_memories"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    session_id: Mapped[str] = mapped_column(String(120), index=True, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    entities_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    recent_messages_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    last_route: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    last_tool_calls_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class SupportFollowupStatus(str, enum.Enum):
+    pending = "pending"
+    processing = "processing"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+class SupportFollowup(Base):
+    __tablename__ = "support_followups"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    session_id: Mapped[str] = mapped_column(String(120), default="", nullable=False, index=True)
+    business_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    business_id: Mapped[str] = mapped_column(String(120), default="", nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(160), unique=True, nullable=False)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    status: Mapped[SupportFollowupStatus] = mapped_column(
+        Enum(SupportFollowupStatus, native_enum=False),
+        default=SupportFollowupStatus.pending,
+        nullable=False,
+        index=True,
+    )
+    payload_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class MessageOutboxStatus(str, enum.Enum):
+    pending = "pending"
+    sending = "sending"
+    sent = "sent"
+    failed = "failed"
+    dead = "dead"
+
+
+class MessageOutbox(Base):
+    __tablename__ = "message_outbox"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(160), unique=True, nullable=False)
+    channel: Mapped[str] = mapped_column(String(64), default="in_app", nullable=False, index=True)
+    recipient_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    session_id: Mapped[str] = mapped_column(String(120), default="", nullable=False, index=True)
+    message_type: Mapped[str] = mapped_column(String(64), default="support_reply", nullable=False, index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    status: Mapped[MessageOutboxStatus] = mapped_column(
+        Enum(MessageOutboxStatus, native_enum=False),
+        default=MessageOutboxStatus.pending,
+        nullable=False,
+        index=True,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_error: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class SupportTicket(Base):
     __tablename__ = "support_tickets"
 

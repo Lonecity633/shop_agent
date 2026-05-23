@@ -52,10 +52,22 @@ class Settings(BaseSettings):
     agent_service_port: int = 8001
     backend_service_port: int = 8000
 
+    support_agent_loop_enabled: bool | None = None
+    support_agent_loop_max_steps: int | None = None
+    support_agent_loop_tool_cache_seconds: int | None = None
+    support_memory_recent_messages: int = 12
+    support_memory_summary_trigger_messages: int = 16
+    support_memory_summary_max_chars: int = 800
+    support_memory_persist_path: str = ""
+    support_mcp_retry_attempts: int = 2
+    support_mcp_retry_backoff_seconds: float = 0.2
+
+    # Legacy names kept for existing .env/deployments; prefer support_agent_loop_*.
     support_react_enabled: bool = True
     support_llm_routing_enabled: bool = True
     support_react_max_steps: int = 4
     support_react_tool_cache_seconds: int = 60
+    # Legacy unused ReAct-era fields kept only to avoid breaking old config.
     support_react_trigger_confidence: float = 0.65
     support_react_allowed_tools: str = (
         "get_order_details,get_product_snapshot,search_products,query_policy_kb,"
@@ -75,6 +87,24 @@ class Settings(BaseSettings):
             f"mysql+aiomysql://{self.mysql_user}:{self.mysql_password}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_db}?charset=utf8mb4"
         )
+
+    @property
+    def agent_loop_enabled(self) -> bool:
+        if self.support_agent_loop_enabled is not None:
+            return self.support_agent_loop_enabled
+        return self.support_react_enabled
+
+    @property
+    def agent_loop_max_steps(self) -> int:
+        if self.support_agent_loop_max_steps is not None:
+            return self.support_agent_loop_max_steps
+        return self.support_react_max_steps
+
+    @property
+    def agent_loop_tool_cache_seconds(self) -> int:
+        if self.support_agent_loop_tool_cache_seconds is not None:
+            return self.support_agent_loop_tool_cache_seconds
+        return self.support_react_tool_cache_seconds
 
 
 settings = Settings()

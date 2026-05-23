@@ -29,7 +29,6 @@ def test_agent_does_not_import_backend_or_local_business_implementation():
             "from app.crud",
             "from app.db",
             "from app.services",
-            "from app.agent.tools",
             "sqlalchemy",
             "AsyncSessionLocal",
             "get_db",

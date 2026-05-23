@@ -11,6 +11,8 @@ def test_backend_exposes_product_order_and_policy_routes():
     assert 'APIRouter(prefix="/products"' in product_router
     assert '@router.get("/{order_no}"' in order_router
     assert '@router.get("/knowledge/policies/search")' in internal_tools
+    assert '@router.get("/payments/status")' in internal_tools
+    assert '@router.post("/support-tickets")' in internal_tools
 
 
 def test_backend_entrypoint_does_not_expose_agent_chat():

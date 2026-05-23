@@ -45,6 +45,34 @@ class BackendAPIClient:
             raise
         return payload.get("data") if isinstance(payload, dict) and "data" in payload else payload
 
+    async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        headers = {INTERNAL_SECRET_HEADER: self.internal_secret}
+        started_at = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=settings.mcp_tool_timeout_seconds) as client:
+                response = await client.post(f"{self.base_url}{path}", json=payload, headers=headers)
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.info(
+                "mcp_backend_api_post_completed path=%s status_code=%s duration_ms=%s payload_keys=%s",
+                path,
+                response.status_code,
+                duration_ms,
+                sorted(payload.keys()),
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.exception(
+                "mcp_backend_api_post_failed path=%s duration_ms=%s error=%s payload_keys=%s",
+                path,
+                duration_ms,
+                exc.__class__.__name__,
+                sorted(payload.keys()),
+            )
+            raise
+        return data.get("data") if isinstance(data, dict) and "data" in data else data
+
     async def get_order_detail(self, *, user_id: int, user_role: str, order_id: str) -> dict[str, Any]:
         return await self._get(
             f"/api/internal/tools/orders/{order_id}",
@@ -72,6 +100,31 @@ class BackendAPIClient:
             {"user_id": user_id, "user_role": user_role},
         )
         return data if isinstance(data, dict) else None
+
+    async def get_payment_status(
+        self,
+        *,
+        user_id: int,
+        user_role: str,
+        order_id: str | None = None,
+        payment_no: str | None = None,
+    ) -> list[dict[str, Any]]:
+        data = await self._get(
+            "/api/internal/tools/payments/status",
+            {"user_id": user_id, "user_role": user_role, "order_id": order_id, "payment_no": payment_no},
+        )
+        return data if isinstance(data, list) else []
+
+    async def create_support_ticket(self, **payload: Any) -> dict[str, Any] | None:
+        data = await self._post("/api/internal/tools/support-tickets", payload)
+        return data if isinstance(data, dict) else None
+
+    async def list_support_tickets(self, *, user_id: int, user_role: str, limit: int = 5) -> list[dict[str, Any]]:
+        data = await self._get(
+            f"/api/internal/tools/users/{user_id}/support-tickets",
+            {"user_role": user_role, "limit": limit},
+        )
+        return data if isinstance(data, list) else []
 
     async def search_after_sale_policy(self, *, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         data = await self._get("/api/internal/tools/knowledge/policies/search", {"query": query, "top_k": top_k})

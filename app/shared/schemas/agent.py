@@ -15,4 +15,8 @@ class AgentChatResponse(BaseModel):
     route: str
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     context: list[dict[str, Any]] = Field(default_factory=list)
-
+    trace_id: str = ""
+    routing_source: str = ""
+    latency_ms: int = 0
+    fallback_reason: str = ""
+    ticket_id: int | None = None
