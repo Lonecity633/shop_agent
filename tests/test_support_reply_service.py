@@ -65,6 +65,56 @@ def test_auto_reply_persists_user_and_assistant_messages(monkeypatch):
     assert saved_messages[1].content == "订单正在配送中。"
 
 
+def test_auto_reply_passes_agent_support_ticket_to_frontend(monkeypatch):
+    saved_messages = []
+
+    async def fake_get_support_session(db, session_id):
+        return SimpleNamespace(id=session_id, user_id=7)
+
+    async def fake_create_support_message(db, session_id, payload):
+        message = SimpleNamespace(id=len(saved_messages) + 1, session_id=session_id, role=payload.role, content=payload.content)
+        saved_messages.append(message)
+        return {"message": message}
+
+    async def fake_agent_chat(self, *, user_id, session_id, message):
+        return {
+            "answer": "已为你创建人工客服工单，工单号 19，客服会尽快处理。",
+            "route": "support_ticket",
+            "tool_calls": [{"name": "create_support_ticket"}],
+            "ticket_id": 19,
+            "support_ticket": {
+                "ticket_id": 19,
+                "status": "pending",
+                "category": "logistics_issue",
+                "priority": "high",
+                "assigned_role": "seller",
+                "order_id": "123",
+                "product_id": None,
+                "refund_id": None,
+                "title": "[处理超时] 我的订单 123 超时还没发货",
+                "trigger_reason": "timeout: 用户表达订单处理超时",
+            },
+        }
+
+    monkeypatch.setattr(support_service.support_crud, "get_support_session", fake_get_support_session)
+    monkeypatch.setattr(support_service.support_crud, "create_support_message", fake_create_support_message)
+    monkeypatch.setattr(support_service, "rate_limit_service", FakeRateLimitService())
+    monkeypatch.setattr(AgentAPIClient, "chat", fake_agent_chat)
+
+    result = asyncio.run(
+        support_service.auto_reply(
+            db=None,
+            current_user=SimpleNamespace(id=7, role=UserRole.buyer),
+            session_id=123,
+            payload=SimpleNamespace(content="我的订单 123 超时还没发货"),
+        )
+    )
+
+    assert result["support_ticket"]["ticket_id"] == 19
+    assert result["support_ticket"]["assigned_role"] == "seller"
+    assert result["support_ticket"]["priority"] == "high"
+
+
 def test_auto_reply_keeps_user_message_when_agent_fails(monkeypatch):
     saved_messages = []
 

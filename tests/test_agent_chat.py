@@ -48,6 +48,28 @@ class FakeMcpClient:
         return {"success": True, "data": None, "error": None}
 
 
+class FailingOrderMcpClient(FakeMcpClient):
+    async def call_tool(self, name, arguments):
+        self.calls.append({"name": name, "arguments": arguments})
+        if name == "get_order_detail":
+            return {"success": False, "data": None, "error": "ORDER_SERVICE_DOWN"}
+        if name == "create_support_ticket":
+            return {
+                "success": True,
+                "data": {
+                    "ticket_id": 19,
+                    "status": "pending",
+                    "category": arguments["category"],
+                    "priority": arguments["priority"],
+                    "assigned_role": "seller",
+                    "title": arguments["title"],
+                    "trigger_reason": arguments["trigger_reason"],
+                },
+                "error": None,
+            }
+        return await super().call_tool(name, arguments)
+
+
 class FakeResponseGenerator:
     def __init__(self):
         self.calls = []
@@ -114,6 +136,63 @@ def test_agent_human_request_creates_support_ticket():
     assert mcp.calls[0]["name"] == "create_support_ticket"
     assert response.ticket_id == 9
     assert response.trace_id
+
+
+def test_agent_complaint_creates_high_priority_complaint_ticket():
+    mcp = FakeMcpClient()
+    service = AgentService(mcp_client=mcp, context_manager=ContextManager(), response_generator=FakeResponseGenerator())
+    response = run_without_llm_routing(service.handle_message(1, "s1", "我要投诉商家服务太差了"))
+
+    assert response.route == "support_ticket"
+    assert mcp.calls[0]["name"] == "create_support_ticket"
+    assert mcp.calls[0]["arguments"]["category"] == "complaint"
+    assert mcp.calls[0]["arguments"]["priority"] == "high"
+    assert "complaint" in mcp.calls[0]["arguments"]["trigger_reason"]
+
+
+def test_agent_dispute_creates_platform_rule_ticket():
+    mcp = FakeMcpClient()
+    service = AgentService(mcp_client=mcp, context_manager=ContextManager(), response_generator=FakeResponseGenerator())
+    response = run_without_llm_routing(service.handle_message(1, "s1", "商家拒绝退款，我要求平台介入仲裁"))
+
+    assert response.route == "support_ticket"
+    assert mcp.calls[0]["arguments"]["category"] == "platform_rule"
+    assert mcp.calls[0]["arguments"]["priority"] == "high"
+    assert "dispute" in mcp.calls[0]["arguments"]["trigger_reason"]
+
+
+def test_agent_timeout_creates_high_priority_business_ticket():
+    mcp = FakeMcpClient()
+    service = AgentService(mcp_client=mcp, context_manager=ContextManager(), response_generator=FakeResponseGenerator())
+    response = run_without_llm_routing(service.handle_message(1, "s1", "我的订单 123 超时还没发货"))
+
+    assert response.route == "support_ticket"
+    assert mcp.calls[0]["arguments"]["category"] == "logistics_issue"
+    assert mcp.calls[0]["arguments"]["priority"] == "high"
+    assert mcp.calls[0]["arguments"]["order_id"] == "123"
+    assert "timeout" in mcp.calls[0]["arguments"]["trigger_reason"]
+
+
+def test_agent_auto_processing_failure_creates_support_ticket():
+    mcp = FailingOrderMcpClient()
+    service = AgentService(mcp_client=mcp, context_manager=ContextManager(), response_generator=FakeResponseGenerator())
+    response = run_without_llm_routing(service.handle_message(1, "s1", "我的订单 123 到哪了"))
+
+    assert [call["name"] for call in mcp.calls] == ["get_order_detail", "create_support_ticket"]
+    assert response.route == "support_ticket"
+    assert response.ticket_id == 19
+    assert response.support_ticket["ticket_id"] == 19
+    assert mcp.calls[-1]["arguments"]["category"] == "logistics_issue"
+    assert "auto_processing_failed" in mcp.calls[-1]["arguments"]["trigger_reason"]
+
+
+def test_agent_ticket_status_query_does_not_create_ticket():
+    mcp = FakeMcpClient()
+    service = AgentService(mcp_client=mcp, context_manager=ContextManager(), response_generator=FakeResponseGenerator())
+    response = run_without_llm_routing(service.handle_message(1, "s1", "我的工单状态怎么样"))
+
+    assert response.route == "support_ticket"
+    assert mcp.calls[0]["name"] == "list_support_tickets"
 
 
 def test_agent_session_context_supports_followup_order_question():

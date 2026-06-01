@@ -7,6 +7,7 @@ from typing import Any
 
 from app.agent.clients.mcp_client import McpClient
 from app.agent.context_manager import ContextManager
+from app.agent.handoff_policy import SupportHandoffPolicy
 from app.agent.loop import SupportAgentLoop
 from app.agent.llm_router import LLMRouter, RoutingDecision
 from app.agent.memory_store import JsonFileMemoryStore
@@ -33,6 +34,7 @@ class AgentService:
         support_loop: SupportAgentLoop | None = None,
         prompt_assembler: PromptAssembler | None = None,
         lane_manager: SessionLaneManager | None = None,
+        handoff_policy: SupportHandoffPolicy | None = None,
     ) -> None:
         self.prompt_assembler = prompt_assembler or PromptAssembler()
         self.mcp_client = mcp_client or McpClient()
@@ -53,6 +55,7 @@ class AgentService:
             fallback_router=self._fallback_route_message,
         )
         self.lane_manager = lane_manager or SessionLaneManager()
+        self.handoff_policy = handoff_policy or SupportHandoffPolicy()
 
     async def handle_message(self, user_id: int, session_id: str, message: str) -> AgentChatResponse:
         async with self.lane_manager.lane(user_id, session_id):
@@ -72,7 +75,42 @@ class AgentService:
         )
         await self.tool_registry.load_tools()
 
-        if settings.agent_loop_enabled:
+        preemptive_handoff = self._select_handoff_tool(user_id=user_id, message=message, history=history)
+        if preemptive_handoff is not None:
+            route, tool_name, arguments = preemptive_handoff
+            routing_source = "handoff_policy"
+            logger.info(
+                "agent_message_handoff_preempted session_id=%s user_id=%s route=%s tool_name=%s message_len=%s",
+                session_id,
+                user_id,
+                route,
+                tool_name or "",
+                len(message),
+            )
+            tool_calls = []
+            tool_result: dict[str, Any] | None = None
+            if tool_name is not None:
+                tool_result = await self.mcp_client.call_tool(tool_name, arguments)
+                tool_calls.append(
+                    {
+                        "name": tool_name,
+                        "arguments": arguments,
+                        "result": tool_result,
+                        "step": 1,
+                        "routing_source": routing_source,
+                        "confidence": 1.0,
+                        "error_type": _tool_error_type(tool_result),
+                    }
+                )
+            answer = await self.response_generator.generate(
+                route=route,
+                message=message,
+                tool_result=tool_result,
+                history=history,
+                tool_calls=tool_calls,
+            )
+            fallback_reason = _fallback_reason(tool_calls)
+        elif settings.agent_loop_enabled:
             loop_result = await self.support_loop.run(user_id=user_id, session_id=session_id, message=message, history=history)
             route = loop_result.route
             tool_name = loop_result.tool_calls[-1]["name"] if loop_result.tool_calls else None
@@ -81,6 +119,28 @@ class AgentService:
             answer = loop_result.answer
             routing_source = loop_result.tool_calls[-1]["routing_source"] if loop_result.tool_calls else "agent_loop"
             fallback_reason = _fallback_reason(tool_calls)
+            handoff_call = await self._maybe_create_auto_handoff(
+                user_id=user_id,
+                message=message,
+                route=route,
+                history=history,
+                tool_calls=tool_calls,
+                trace_id=trace_id,
+            )
+            if handoff_call is not None:
+                tool_calls.append(handoff_call)
+                route = "support_ticket"
+                tool_name = handoff_call["name"]
+                arguments = handoff_call["arguments"]
+                routing_source = handoff_call["routing_source"]
+                fallback_reason = handoff_call["arguments"].get("trigger_reason", fallback_reason)
+                answer = await self.response_generator.generate(
+                    route=route,
+                    message=message,
+                    tool_result=handoff_call.get("result"),
+                    history=history,
+                    tool_calls=tool_calls,
+                )
         else:
             decision = await self._route_message(user_id=user_id, message=message, history=history)
             route, tool_name, arguments = decision.route, decision.tool_name, decision.arguments
@@ -123,6 +183,28 @@ class AgentService:
                     tool_calls=tool_calls,
                 )
             fallback_reason = _fallback_reason(tool_calls)
+            handoff_call = await self._maybe_create_auto_handoff(
+                user_id=user_id,
+                message=message,
+                route=route,
+                history=history,
+                tool_calls=tool_calls,
+                trace_id=trace_id,
+            )
+            if handoff_call is not None:
+                tool_calls.append(handoff_call)
+                route = "support_ticket"
+                tool_name = handoff_call["name"]
+                arguments = handoff_call["arguments"]
+                routing_source = handoff_call["routing_source"]
+                fallback_reason = handoff_call["arguments"].get("trigger_reason", fallback_reason)
+                answer = await self.response_generator.generate(
+                    route=route,
+                    message=message,
+                    tool_result=handoff_call.get("result"),
+                    history=history,
+                    tool_calls=tool_calls,
+                )
 
         await self.context_manager.append(user_id, session_id, role="user", content=message)
         await self.context_manager.append(user_id, session_id, role="assistant", content=answer)
@@ -146,6 +228,7 @@ class AgentService:
         )
         duration_ms = int((time.perf_counter() - started_at) * 1000)
         ticket_id = _extract_ticket_id(tool_calls)
+        support_ticket = _extract_support_ticket(tool_calls)
         for call in tool_calls:
             if isinstance(call, dict):
                 call.setdefault("trace_id", trace_id)
@@ -173,6 +256,7 @@ class AgentService:
             latency_ms=duration_ms,
             fallback_reason=fallback_reason,
             ticket_id=ticket_id,
+            support_ticket=support_ticket,
         )
 
     async def _summarize_memory(
@@ -199,6 +283,42 @@ class AgentService:
         route, tool_name, arguments = self._select_tool(user_id=user_id, message=message, history=history)
         return RoutingDecision(route=route, tool_name=tool_name, arguments=arguments, source="fallback_rules")
 
+    async def _maybe_create_auto_handoff(
+        self,
+        *,
+        user_id: int,
+        message: str,
+        route: str,
+        history: list[dict[str, str]],
+        tool_calls: list[dict[str, Any]],
+        trace_id: str,
+    ) -> dict[str, Any] | None:
+        decision = self.handoff_policy.classify_auto_failure(route=route, message=message, tool_calls=tool_calls)
+        if decision is None:
+            return None
+        tool_name = self._tool_name("create_support_ticket")
+        if tool_name is None:
+            return None
+        arguments = self.handoff_policy.build_ticket_arguments(
+            user_id=user_id,
+            message=message,
+            decision=decision,
+            order_id=self._extract_order_id(message) or self._extract_recent_entity(history, "order_id"),
+            product_id=self._extract_product_id(message),
+            refund_id=self._extract_refund_id(message),
+            trace_id=trace_id,
+        )
+        result = await self.mcp_client.call_tool(tool_name, arguments)
+        return {
+            "name": tool_name,
+            "arguments": arguments,
+            "result": result,
+            "step": len(tool_calls) + 1,
+            "routing_source": "handoff_policy",
+            "confidence": 1.0,
+            "error_type": _tool_error_type(result),
+        }
+
     async def _route_message(
         self,
         *,
@@ -206,6 +326,11 @@ class AgentService:
         message: str,
         history: list[dict[str, str]],
     ) -> RoutingDecision:
+        handoff_route = self._select_handoff_tool(user_id=user_id, message=message, history=history)
+        if handoff_route is not None:
+            route, tool_name, arguments = handoff_route
+            return RoutingDecision(route=route, tool_name=tool_name, arguments=arguments, confidence=1.0, source="handoff_policy")
+
         if settings.support_llm_routing_enabled:
             try:
                 decision = await self.llm_router.route(user_id=user_id, message=message, history=history)
@@ -235,6 +360,9 @@ class AgentService:
         product_id = self._extract_product_id(text)
         payment_no = self._extract_payment_no(text)
         user_args = {"user_id": user_id, "user_role": "buyer"}
+        handoff_route = self._select_handoff_tool(user_id=user_id, message=message, history=history)
+        if handoff_route is not None:
+            return handoff_route
 
         if refund_id is not None or any(keyword in text for keyword in ("退款进度", "退款单", "退款状态")):
             if refund_id is not None:
@@ -252,19 +380,6 @@ class AgentService:
                 return "payment_query", self._tool_name("get_payment_status"), arguments
             return "payment_query", None, {}
 
-        if any(keyword in text for keyword in ("人工", "客服", "投诉", "升级处理", "工单")):
-            if any(keyword in text for keyword in ("工单进度", "我的工单", "工单状态")):
-                return "support_ticket", self._tool_name("list_support_tickets"), {**user_args, "limit": 5}
-            return "support_ticket", self._tool_name("create_support_ticket"), {
-                **user_args,
-                "title": text[:80] or "人工客服工单",
-                "content": text,
-                "category": "complaint" if "投诉" in text else "other",
-                "priority": "high" if "投诉" in text else "normal",
-                "source": "agent",
-                "trigger_reason": text[:200],
-            }
-
         if order_id is not None or any(keyword in text for keyword in ("订单", "物流", "快递", "发货", "到哪")):
             if order_id is not None:
                 return "order_query", self._tool_name("get_order_detail"), {**user_args, "order_id": order_id}
@@ -280,6 +395,38 @@ class AgentService:
             return "product_inquiry", self._tool_name("search_products"), {"keyword": text, "limit": 5}
 
         return "chitchat", None, {}
+
+    def _select_handoff_tool(
+        self,
+        *,
+        user_id: int,
+        message: str,
+        history: list[dict[str, str]],
+    ) -> tuple[str, str | None, dict[str, Any]] | None:
+        text = message.strip()
+        user_args = {"user_id": user_id, "user_role": "buyer"}
+        order_id = self._extract_order_id(text) or self._extract_recent_entity(history, "order_id")
+        refund_id = self._extract_refund_id(text)
+        product_id = self._extract_product_id(text)
+        entities = {
+            key: value
+            for key, value in {"order_id": order_id, "product_id": product_id, "refund_id": refund_id}.items()
+            if value not in (None, "")
+        }
+        if self.handoff_policy.is_ticket_query(text):
+            return "support_ticket", self._tool_name("list_support_tickets"), {**user_args, "limit": 5}
+
+        handoff = self.handoff_policy.classify_initial(message=text, entities=entities)
+        if handoff is None:
+            return None
+        return "support_ticket", self._tool_name("create_support_ticket"), self.handoff_policy.build_ticket_arguments(
+            user_id=user_id,
+            message=text,
+            decision=handoff,
+            order_id=order_id,
+            product_id=product_id,
+            refund_id=refund_id,
+        )
 
     def _tool_name(self, canonical_name: str) -> str | None:
         return self.tool_registry.resolve_tool_name(canonical_name)
@@ -358,13 +505,38 @@ def _fallback_reason(tool_calls: list[dict[str, Any]]) -> str:
 
 
 def _extract_ticket_id(tool_calls: list[dict[str, Any]]) -> int | None:
+    ticket = _extract_support_ticket(tool_calls)
+    if ticket is None:
+        return None
+    value = ticket.get("ticket_id")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_support_ticket(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | None:
     for item in reversed(tool_calls):
-        result = item.get("result") if isinstance(item, dict) else None
+        if not isinstance(item, dict) or item.get("name") != "create_support_ticket":
+            continue
+        result = item.get("result")
         data = result.get("data") if isinstance(result, dict) else None
-        if isinstance(data, dict):
-            value = data.get("ticket_id") or data.get("id")
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                continue
+        if not isinstance(data, dict):
+            continue
+        ticket_id = data.get("ticket_id") or data.get("id")
+        if ticket_id in (None, ""):
+            continue
+        arguments = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
+        return {
+            "ticket_id": ticket_id,
+            "status": data.get("status") or "pending",
+            "category": data.get("category") or arguments.get("category") or "",
+            "priority": data.get("priority") or arguments.get("priority") or "",
+            "assigned_role": data.get("assigned_role") or "",
+            "order_id": data.get("order_id") or arguments.get("order_id"),
+            "product_id": data.get("product_id") or arguments.get("product_id"),
+            "refund_id": data.get("refund_id") or arguments.get("refund_id"),
+            "title": data.get("title") or arguments.get("title") or "",
+            "trigger_reason": data.get("trigger_reason") or arguments.get("trigger_reason") or "",
+        }
     return None

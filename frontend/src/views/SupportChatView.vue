@@ -85,6 +85,22 @@ function ticketRoleLabel(ticket) {
   return ticket?.assigned_role === 'seller' ? '卖家' : '管理员'
 }
 
+function ticketId(ticket) {
+  return ticket?.ticket_id || ticket?.id
+}
+
+function ticketStatusLabel(ticket) {
+  const labels = {
+    pending: '待处理',
+    processing: '处理中',
+    replied: '已回复',
+    escalated: '已升级',
+    closed: '已关闭',
+    cancelled: '已取消',
+  }
+  return labels[ticket?.status] || ticket?.status || '待处理'
+}
+
 async function sendMessage() {
   const content = input.value.trim()
   if (!content || sending.value) return
@@ -117,8 +133,10 @@ async function sendMessage() {
       content: res.data?.answer || '暂无回复',
       created_at: new Date().toISOString(),
     })
-    if (res.data?.support_ticket?.ticket_id) {
-      ElMessage.success(`已创建人工工单 #${res.data.support_ticket.ticket_id}，处理方：${ticketRoleLabel(res.data.support_ticket)}`)
+    if (ticketId(res.data?.support_ticket)) {
+      ElMessage.success(
+        `已创建人工工单 #${ticketId(res.data.support_ticket)}，处理方：${ticketRoleLabel(res.data.support_ticket)}，状态：${ticketStatusLabel(res.data.support_ticket)}`
+      )
     }
     await nextTick()
     scrollToBottom()
@@ -147,11 +165,11 @@ async function createManualTicket() {
       guardrail_flags: [],
     })
     const ticket = res.data
-    ElMessage.success(`已创建人工工单 #${ticket.id}，处理方：${ticketRoleLabel(ticket)}`)
+    ElMessage.success(`已创建人工工单 #${ticketId(ticket)}，处理方：${ticketRoleLabel(ticket)}，状态：${ticketStatusLabel(ticket)}`)
     messages.value.push({
-      id: `ticket-${ticket.id}`,
+      id: `ticket-${ticketId(ticket)}`,
       role: 'assistant',
-      content: `已为你创建人工客服工单 #${ticket.id}，当前处理方：${ticketRoleLabel(ticket)}。`,
+      content: `已为你创建人工客服工单 #${ticketId(ticket)}，当前处理方：${ticketRoleLabel(ticket)}，状态：${ticketStatusLabel(ticket)}。`,
       created_at: new Date().toISOString(),
     })
     input.value = ''

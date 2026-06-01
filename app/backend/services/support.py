@@ -130,6 +130,7 @@ async def auto_reply(
         route = str(agent_response.get("route") or "unknown")
         tool_calls = agent_response.get("tool_calls")
         evidences = tool_calls if isinstance(tool_calls, list) else []
+        support_ticket = _normalize_agent_support_ticket(agent_response)
 
         assistant_message = await support_crud.create_support_message(
             db,
@@ -151,7 +152,7 @@ async def auto_reply(
             "route": route,
             "resolved_seller_id": None,
             "evidences": evidences,
-            "support_ticket": None,
+            "support_ticket": support_ticket,
         }
     except RateLimitBackendUnavailable as exc:
         raise ServiceError("SUPPORT_RATE_LIMIT_UNAVAILABLE", "客服限流服务暂不可用，请稍后再试", 503) from exc
@@ -192,3 +193,35 @@ def _ensure_session_access(current_user: User, session_user_id: int) -> None:
     if current_user.role in (UserRole.buyer, UserRole.seller) and current_user.id == session_user_id:
         return
     raise ServiceError("SUPPORT_SESSION_FORBIDDEN", "当前用户无权访问该会话", 403)
+
+
+def _normalize_agent_support_ticket(agent_response: dict) -> dict | None:
+    ticket = agent_response.get("support_ticket")
+    if isinstance(ticket, dict) and ticket.get("ticket_id"):
+        return {
+            "ticket_id": ticket.get("ticket_id"),
+            "status": ticket.get("status") or "pending",
+            "category": ticket.get("category") or "",
+            "priority": ticket.get("priority") or "",
+            "assigned_role": ticket.get("assigned_role") or "",
+            "order_id": ticket.get("order_id"),
+            "product_id": ticket.get("product_id"),
+            "refund_id": ticket.get("refund_id"),
+            "title": ticket.get("title") or "",
+            "trigger_reason": ticket.get("trigger_reason") or "",
+        }
+    ticket_id = agent_response.get("ticket_id")
+    if ticket_id in (None, ""):
+        return None
+    return {
+        "ticket_id": ticket_id,
+        "status": "pending",
+        "category": "",
+        "priority": "",
+        "assigned_role": "",
+        "order_id": None,
+        "product_id": None,
+        "refund_id": None,
+        "title": "",
+        "trigger_reason": "",
+    }

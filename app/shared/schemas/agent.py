@@ -20,3 +20,4 @@ class AgentChatResponse(BaseModel):
     latency_ms: int = 0
     fallback_reason: str = ""
     ticket_id: int | None = None
+    support_ticket: dict[str, Any] | None = None
